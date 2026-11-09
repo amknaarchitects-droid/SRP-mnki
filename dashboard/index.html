@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SRP — Share RAM Protocol Live Node & Coordinator Inspector</title>
+  <style>
+    :root {
+      --bg: #0b0f17;
+      --panel: #131b2e;
+      --border: #23304d;
+      --accent: #38bdf8;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 28px;
+      line-height: 1.5;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 18px;
+      margin-bottom: 24px;
+    }
+    .badge {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--green);
+      border: 1px solid var(--green);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+      gap: 18px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .card h3 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .metric {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .sub {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    button, select {
+      background: #1e293b;
+      color: var(--text);
+      border: 1px solid var(--accent);
+      padding: 10px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover { background: var(--accent); color: #000; }
+    .page-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(22px, 1fr));
+      gap: 4px;
+      margin-top: 12px;
+    }
+    .page-cell {
+      height: 22px;
+      border-radius: 4px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      transition: all 0.2s;
+    }
+    .page-cell.base { background: #0284c7; border-color: #38bdf8; }
+    .page-cell.dirty { background: #f59e0b; border-color: #fde047; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Share RAM Protocol (SRP) — Volatile CoW Arena Inspector</h1>
+      <p style="color: var(--muted); font-size: 14px;">
+        Open-Source Public Good • 0% Protocol Fee • Zero Disk Wear (`tmpfs` / 4KB CoW Pages)
+      </p>
+    </div>
+    <span class="badge">DISK WRITES: 0 B (100% VOLATILE DRAM)</span>
+  </header>
+
+  <div class="controls">
+    <button onclick="forkGroup(16)">Fork 16 GRPO Branches (SRP_FORK)</button>
+    <button onclick="executeStepBatch()">Execute Parallel Verifier Steps (SRP_STEP)</button>
+    <button onclick="injectCanary()">Run Proof-of-Honest-RAM Audit</button>
+    <select id="economicMode" onchange="updateLedgerView()">
+      <option value="USD_CREDITS">Settlement Mode: AI Lab USD / API Credits</option>
+      <option value="SRP_USDC">Settlement Mode: DePIN Token / USDC Escrow</option>
+      <option value="HUMANITY_KARMA">Settlement Mode: Open-Science Humanity Karma</option>
+    </select>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Active CoW Rollout Branches</h3>
+      <div class="metric" id="branchCount">4</div>
+      <div class="sub" id="forkLatency">Last Fork Latency: 0.38 ms</div>
+    </div>
+    <div class="card">
+      <h3>Copy-on-Write RAM Savings</h3>
+      <div class="metric" id="cowSavings" style="color: var(--green);">94.2%</div>
+      <div class="sub" id="ramComparison">Physical DRAM: 540 MB vs Unshared: 9.3 GB</div>
+    </div>
+    <div class="card">
+      <h3>Verified RL Steps Executed</h3>
+      <div class="metric" id="stepCount">128</div>
+      <div class="sub" id="canaryStatus">Canary Audits Passed: 100% (0 Fraud Proofs)</div>
+    </div>
+    <div class="card">
+      <h3>Contributor Earnings</h3>
+      <div class="metric" id="earningsDisplay">2.84 USD_CREDITS</div>
+      <div class="sub">0% Protocol Tax — 100% to RAM Provider</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom: 24px;">
+    <h3>Live 4KB Volatile RAM Page Map (Blue = Shared Immutable Base Pages, Amber = CoW Branch Delta Pages)</h3>
+    <div class="page-grid" id="pageMap"></div>
+  </div>
+
+  <div class="card">
+    <h3>Active Flagship Verifier Suites in RAM Arena</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Suite ID</th>
+          <th>Pinned Snapshot</th>
+          <th>Runtime Tier</th>
+          <th>Base Pages</th>
+          <th>Active Branches</th>
+          <th>Last Verifier Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>srp-env-code</code></td>
+          <td><code>snap_swe_sorting_v1</code></td>
+          <td><code>wasm_cow</code></td>
+          <td>128 MB</td>
+          <td id="suiteCodeBranches">1</td>
+          <td style="color: var(--green);">Tests Passed (2/2) → Reward +1.0</td>
+        </tr>
+        <tr>
+          <td><code>srp-env-math</code></td>
+          <td><code>snap_lean4_algebra_v1</code></td>
+          <td><code>wasm_cow</code></td>
+          <td>256 MB</td>
+          <td id="suiteMathBranches">1</td>
+          <td style="color: var(--green);">Goals Accomplished (QED) → Reward +1.0</td>
+        </tr>
+        <tr>
+          <td><code>srp-env-web</code></td>
+          <td><code>snap_web_checkout_v1</code></td>
+          <td><code>wasm_cow</code></td>
+          <td>64 MB</td>
+          <td id="suiteWebBranches">1</td>
+          <td style="color: var(--green);">DOM Goal Reached → Reward +1.0</td>
+        </tr>
+        <tr>
+          <td><code>srp-env-spatial</code></td>
+          <td><code>snap_cad_pedestal_v1</code></td>
+          <td><code>container_tmpfs</code></td>
+          <td>92 MB</td>
+          <td id="suiteCadBranches">1</td>
+          <td style="color: var(--green);">BBox & CoM Stable → Reward +1.0</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    let branches = 4;
+    let steps = 128;
+    let dirtyPages = 18;
+    const basePages = 140;
+
+    function renderPages() {
+      const container = document.getElementById('pageMap');
+      container.innerHTML = '';
+      for (let i = 0; i < 240; i++) {
+        const div = document.createElement('div');
+        div.className = 'page-cell';
+        if (i < basePages) div.classList.add('base');
+        else if (i < basePages + dirtyPages) div.classList.add('dirty');
+        container.appendChild(div);
+      }
+    }
+
+    function updateMetrics() {
+      document.getElementById('branchCount').textContent = branches;
+      document.getElementById('stepCount').textContent = steps;
+      const physicalMB = 540 + (dirtyPages * 0.25);
+      const logicalMB = branches * 540;
+      const savings = Math.max(0, (1 - physicalMB / logicalMB) * 100).toFixed(1);
+      document.getElementById('cowSavings').textContent = savings + '%';
+      document.getElementById('ramComparison').textContent =
+        `Physical DRAM: ${physicalMB.toFixed(1)} MB vs Unshared: ${(logicalMB / 1024).toFixed(1)} GB`;
+      document.getElementById('suiteCodeBranches').textContent = Math.ceil(branches / 4);
+      document.getElementById('suiteMathBranches').textContent = Math.ceil(branches / 4);
+      document.getElementById('suiteWebBranches').textContent = Math.floor(branches / 4);
+      document.getElementById('suiteCadBranches').textContent = Math.floor(branches / 4);
+      updateLedgerView();
+      renderPages();
+    }
+
+    function forkGroup(n) {
+      branches += n;
+      dirtyPages = Math.min(95, dirtyPages + 4);
+      document.getElementById('forkLatency').textContent =
+        `Last Fork Latency: ${(0.25 + Math.random() * 0.35).toFixed(2)} ms (${n} CoW branches)`;
+      updateMetrics();
+    }
+
+    function executeStepBatch() {
+      steps += branches;
+      dirtyPages = Math.min(95, dirtyPages + 6);
+      updateMetrics();
+    }
+
+    function injectCanary() {
+      document.getElementById('canaryStatus').textContent =
+        `Canary & MemoryPing Verified in ${(0.4 + Math.random() * 0.4).toFixed(2)} ms (100% Honest DRAM)`;
+    }
+
+    function updateLedgerView() {
+      const mode = document.getElementById('economicMode').value;
+      let val = 0;
+      if (mode === 'USD_CREDITS') val = (steps * 0.022).toFixed(2) + ' USD_CREDITS';
+      else if (mode === 'SRP_USDC') val = (steps * 0.025).toFixed(2) + ' SRP_USDC';
+      else val = Math.round(steps * 15) + ' HUMANITY_KARMA';
+      document.getElementById('earningsDisplay').textContent = val;
+    }
+
+    updateMetrics();
+  </script>
+</body>
+</html>

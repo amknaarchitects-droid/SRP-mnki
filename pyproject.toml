@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "share-ram-protocol"
+version = "0.1.0"
+description = "Share RAM Protocol (SRP): Open-source decentralized Copy-on-Write in-memory RL environment execution and verification fabric."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Share RAM Protocol (SRP) Open-Source Contributors" }
+]
+keywords = [
+    "reinforcement-learning",
+    "rlvr",
+    "grpo",
+    "distributed-systems",
+    "copy-on-write",
+    "ram-sharing",
+    "ai-post-training",
+    "verifiers",
+    "sandbox"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: System :: Distributed Computing",
+]
+dependencies = []
+
+[project.optional-dependencies]
+wasm = ["wasmtime>=20.0.0"]
+gym = ["gymnasium>=0.29.0"]
+dev = ["pytest>=7.4.0", "pytest-asyncio>=0.23.0"]
+
+[project.scripts]
+srp = "srp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["srp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
