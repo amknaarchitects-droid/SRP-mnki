@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "share-ram-protocol"
-version = "0.1.0"
+version = "0.3.0"
 description = "Share RAM Protocol (SRP): Open-source decentralized Copy-on-Write in-memory RL environment execution and verification fabric."
 readme = "README.md"
 license = { text = "MIT" }
@@ -24,7 +24,7 @@ keywords = [
     "sandbox"
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
@@ -38,6 +38,7 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+crypto = ["cryptography>=41.0.0"]
 wasm = ["wasmtime>=20.0.0"]
 gym = ["gymnasium>=0.29.0"]
 dev = ["pytest>=7.4.0", "pytest-asyncio>=0.23.0"]
@@ -50,5 +51,6 @@ where = ["."]
 include = ["srp*"]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

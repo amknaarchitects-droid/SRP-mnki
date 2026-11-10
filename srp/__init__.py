@@ -6,7 +6,7 @@ into a zero-disk-wear, Copy-on-Write (CoW) in-memory execution and verification
 fabric for AI Reinforcement Learning (RL) post-training.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 
 from srp.protocol.messages import (
     ActionPayload,

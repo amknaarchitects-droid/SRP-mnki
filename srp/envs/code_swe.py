@@ -1,185 +1,179 @@
 """
 SRP Flagship Verifier Suite 1: `srp-env-code` (Code & SWE Unit-Test Verifier)
 =============================================================================
-Executes code patches and unit assertions strictly in-memory against a
-Copy-on-Write (CoW) branch without touching the host filesystem.
+Stores code patches in a Copy-on-Write (CoW) branch and grades them against the
+snapshot's pinned `test_suite.py`. Agent code is executed only inside the
+isolated, resource-limited child interpreter in `srp.envs.sandbox`.
 """
 
 from __future__ import annotations
 
 import ast
-import io
-import contextlib
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
+from srp.envs.sandbox import SandboxPolicyError, run_test_job, validate_code
 from srp.node.ram_arena import CoWBranch
 from srp.protocol.messages import ActionPayload, StepObservation
 
-SAFE_BUILTINS = {
-    "abs": abs,
-    "all": all,
-    "any": any,
-    "bin": bin,
-    "bool": bool,
-    "chr": chr,
-    "dict": dict,
-    "divmod": divmod,
-    "enumerate": enumerate,
-    "filter": filter,
-    "float": float,
-    "hex": hex,
-    "int": int,
-    "isinstance": isinstance,
-    "len": len,
-    "list": list,
-    "map": map,
-    "max": max,
-    "min": min,
-    "ord": ord,
-    "pow": pow,
-    "print": print,
-    "range": range,
-    "reversed": reversed,
-    "round": round,
-    "set": set,
-    "slice": slice,
-    "sorted": sorted,
-    "str": str,
-    "sum": sum,
-    "tuple": tuple,
-    "zip": zip,
-    "ValueError": ValueError,
-    "TypeError": TypeError,
-    "KeyError": KeyError,
-    "IndexError": IndexError,
-    "AssertionError": AssertionError,
-    "Exception": Exception,
-}
-
-FORBIDDEN_AST_NODES = (ast.Import, ast.ImportFrom)
+PINNED_TEST_FILE = "test_suite.py"
+LOG_FILE = ".last_run.log"
 
 
-def _validate_ast_safety(code_str: str) -> None:
-    tree = ast.parse(code_str)
-    for node in ast.walk(tree):
-        if isinstance(node, FORBIDDEN_AST_NODES):
-            raise PermissionError("Import statements are blocked in Tier-1 in-memory code sandbox")
-        if isinstance(node, ast.Name) and node.id.startswith("__"):
-            raise PermissionError(f"Dunder attribute access '{node.id}' is blocked in sandbox")
-        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
-            raise PermissionError(f"Dunder attribute '{node.attr}' is blocked in sandbox")
+def _validate_ast_safety(code_str: str) -> ast.AST:
+    """Backwards-compatible alias for the sandbox static policy."""
+    return validate_code(code_str)
 
 
 class CodeSWEVerifier:
     """
     In-memory SWE / Code RL environment verifier.
     Supports commands:
-      - `apply_patch`: writes updated source code to `solution.py` (or target file) in CoW RAM
-        and immediately runs the pinned `test_suite.py` assertions.
-      - `read_file`: reads a file from the CoW branch.
+      - `apply_patch` / `submit_code`: write source to `solution.py` (or another
+        non-test path) in CoW RAM, then run the pinned `test_suite.py`.
+      - `read_file`: read a file from the CoW branch.
     """
 
     suite_name = "srp-env-code"
 
     def step(
-        self, branch: CoWBranch, action: ActionPayload
+        self, branch: CoWBranch, action: ActionPayload, timeout_ms: int = 5000
     ) -> Tuple[StepObservation, float, bool]:
         cmd = action.command
-        payload: Dict[str, Any] = action.payload
+        payload: Dict[str, Any] = action.payload if isinstance(action.payload, dict) else {}
 
         if cmd == "read_file":
-            target = payload.get("path", "solution.py")
+            target = str(payload.get("path", "solution.py"))
+            if target in (PINNED_TEST_FILE, LOG_FILE):
+                # Grading inputs stay hidden so they cannot simply be hard-coded.
+                return (
+                    StepObservation(
+                        stdout="", stderr=f"PermissionError: '{target}' is not readable", exit_code=1
+                    ),
+                    0.0,
+                    False,
+                )
             try:
-                content = branch.read_file(target)
-                return StepObservation(stdout=content, exit_code=0), 0.0, False
+                return StepObservation(stdout=branch.read_file(target), exit_code=0), 0.0, False
             except FileNotFoundError as exc:
                 return StepObservation(stdout="", stderr=str(exc), exit_code=1), 0.0, False
 
-        if cmd in ("apply_patch", "submit_code"):
-            target_file = payload.get("path", "solution.py")
-            new_code = payload.get("code", "")
-            test_file = payload.get("test_path", "test_suite.py")
+        if cmd not in ("apply_patch", "submit_code"):
+            return (
+                StepObservation(stdout="", stderr=f"Unknown command '{cmd}'", exit_code=2),
+                0.0,
+                False,
+            )
 
-            # Mutate the CoW branch in volatile RAM (allocates 4KB delta pages)
-            branch.write_file(target_file, new_code)
+        target_file = str(payload.get("path", "solution.py"))
+        new_code = str(payload.get("code", ""))
 
-            try:
-                _validate_ast_safety(new_code)
-                test_code = branch.read_file(test_file)
-                _validate_ast_safety(test_code)
-            except Exception as exc:
-                branch.write_file(".last_run.log", f"VALIDATION_ERROR: {exc}\n")
-                return (
-                    StepObservation(stdout="", stderr=f"Validation Error: {exc}", exit_code=1),
-                    0.0,
-                    False,
-                )
-
-            stdout_buf = io.StringIO()
-            Namespace: Dict[str, Any] = {"__builtins__": dict(SAFE_BUILTINS)}
-
-            try:
-                with contextlib.redirect_stdout(stdout_buf):
-                    exec(compile(new_code, target_file, "exec"), Namespace)
-                    exec(compile(test_code, test_file, "exec"), Namespace)
-
-                # Discover and run all `test_*` functions in test_suite.py
-                test_funcs = [
-                    (name, fn)
-                    for name, fn in sorted(Namespace.items())
-                    if name.startswith("test_") and callable(fn)
-                ]
-                if not test_funcs:
-                    branch.write_file(".last_run.log", "PASSED_SCRIPT\n")
-                    return (
-                        StepObservation(
-                            stdout=stdout_buf.getvalue() + "\nAll assertions passed.",
-                            exit_code=0,
-                        ),
-                        1.0,
-                        True,
-                    )
-
-                passed = 0
-                failures = []
-                for name, fn in test_funcs:
-                    try:
-                        with contextlib.redirect_stdout(stdout_buf):
-                            fn()
-                        passed += 1
-                    except Exception as test_exc:
-                        failures.append(f"{name}: {type(test_exc).__name__}: {test_exc}")
-
-                total = len(test_funcs)
-                reward = round(passed / total, 4)
-                terminated = passed == total
-                summary = f"Tests Passed: {passed}/{total}"
-                branch.write_file(".last_run.log", f"{summary}\n" + "\n".join(failures))
-
-                return (
-                    StepObservation(
-                        stdout=(stdout_buf.getvalue() + "\n" + summary).strip(),
-                        stderr="\n".join(failures),
-                        exit_code=0 if terminated else 1,
-                        structured_data={"passed": passed, "total": total},
+        # The grading test file is fixed by the snapshot, never chosen by the agent:
+        # an agent-supplied `test_path` could point at a file it wrote itself.
+        test_file = PINNED_TEST_FILE
+        requested_test = payload.get("test_path")
+        if requested_test is not None and str(requested_test) != test_file:
+            return (
+                StepObservation(
+                    stdout="",
+                    stderr=(
+                        f"PermissionError: test_path is fixed to '{test_file}'; "
+                        "agent-selected test files are not allowed"
                     ),
-                    reward,
-                    terminated,
-                )
-            except Exception as exc:
-                branch.write_file(".last_run.log", f"RUNTIME_ERROR: {exc}\n")
-                return (
-                    StepObservation(
-                        stdout=stdout_buf.getvalue(),
-                        stderr=f"{type(exc).__name__}: {exc}",
-                        exit_code=1,
-                    ),
-                    0.0,
-                    False,
-                )
+                    exit_code=1,
+                ),
+                0.0,
+                False,
+            )
+        if target_file == test_file or target_file == LOG_FILE:
+            return (
+                StepObservation(
+                    stdout="",
+                    stderr=f"PermissionError: Overwriting {target_file} is prohibited",
+                    exit_code=1,
+                ),
+                0.0,
+                False,
+            )
 
+        try:
+            validate_code(new_code)
+            test_code = branch.read_file(test_file)
+            test_tree = validate_code(test_code)
+        except (SandboxPolicyError, SyntaxError, ValueError, FileNotFoundError) as exc:
+            branch.write_file(LOG_FILE, f"VALIDATION_ERROR: {exc}\n")
+            return (
+                StepObservation(stdout="", stderr=f"Validation Error: {exc}", exit_code=1),
+                0.0,
+                False,
+            )
+
+        # Mutate the CoW branch in volatile RAM after validation succeeds
+        branch.write_file(target_file, new_code)
+
+        declared_test_names: List[str] = [
+            node.name
+            for node in getattr(test_tree, "body", [])
+            if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
+        ]
+        if not declared_test_names:
+            branch.write_file(LOG_FILE, "NO_TESTS_FOUND\n")
+            return (
+                StepObservation(
+                    stdout="", stderr=f"No test_* functions found in '{test_file}'", exit_code=1
+                ),
+                0.0,
+                False,
+            )
+
+        result = run_test_job(
+            solution_code=new_code,
+            test_code=test_code,
+            test_names=declared_test_names,
+            solution_path=target_file,
+            test_path=test_file,
+            timeout_ms=timeout_ms,
+        )
+        stdout = result["stdout"]
+        meta = {
+            "timed_out": bool(result["timed_out"]),
+            "fuel_used": int(result["fuel_used"]),
+            "fuel_limit": int(result["fuel_limit"]),
+            "fuel_exhausted": bool(result["fuel_exhausted"]),
+        }
+
+        if result["error"] is not None:
+            branch.write_file(LOG_FILE, f"RUNTIME_ERROR: {result['error']}\n")
+            return (
+                StepObservation(
+                    stdout=stdout, stderr=str(result["error"]), exit_code=1, structured_data=meta
+                ),
+                0.0,
+                False,
+            )
+
+        passed, total = result["passed"], result["total"]
+        if total == 0:
+            branch.write_file(LOG_FILE, "NO_TESTS_FOUND\n")
+            return (
+                StepObservation(
+                    stdout=stdout, stderr=f"No test_* functions found in '{test_file}'", exit_code=1
+                ),
+                0.0,
+                False,
+            )
+
+        failures = result["failures"]
+        reward = round(passed / total, 4)
+        terminated = passed == total
+        summary = f"Tests Passed: {passed}/{total}"
+        branch.write_file(LOG_FILE, f"{summary}\n" + "\n".join(failures))
         return (
-            StepObservation(stdout="", stderr=f"Unknown command '{cmd}'", exit_code=2),
-            0.0,
-            False,
+            StepObservation(
+                stdout=(stdout + "\n" + summary).strip(),
+                stderr="\n".join(failures),
+                exit_code=0 if terminated else 1,
+                structured_data={"passed": passed, "total": total, **meta},
+            ),
+            reward,
+            terminated,
         )

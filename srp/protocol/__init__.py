@@ -13,6 +13,8 @@ from srp.protocol.messages import (
     compute_merkle_root,
     sha256_hex,
 )
+from srp.protocol.crypto import NodeKeypair, verify_signature
+from srp.protocol.wire import WireError, decode_message, encode_message
 
 __all__ = [
     "ActionPayload",
@@ -27,4 +29,9 @@ __all__ = [
     "StepResult",
     "compute_merkle_root",
     "sha256_hex",
+    "NodeKeypair",
+    "verify_signature",
+    "WireError",
+    "encode_message",
+    "decode_message",
 ]

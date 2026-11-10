@@ -29,10 +29,10 @@ class WebDOMVerifier:
     suite_name = "srp-env-web"
 
     def step(
-        self, branch: CoWBranch, action: ActionPayload
+        self, branch: CoWBranch, action: ActionPayload, timeout_ms: int = 5000
     ) -> Tuple[StepObservation, float, bool]:
         cmd = action.command
-        payload: Dict[str, Any] = action.payload
+        payload: Dict[str, Any] = action.payload if isinstance(action.payload, dict) else {}
 
         try:
             dom: Dict[str, Any] = json.loads(branch.read_file("dom_state.json"))
@@ -47,12 +47,27 @@ class WebDOMVerifier:
         goal_conditions: Dict[str, Any] = dom.get("goal_conditions", {})
         history = dom.get("interaction_log", [])
 
+        goal_already_rewarded = bool(dom.get("_goal_rewarded", False))
+
         if cmd == "observe_dom":
             tree_str = self._render_a11y_tree(dom)
             return (
                 StepObservation(stdout=tree_str, structured_data={"url": dom.get("url", "/")}),
                 0.0,
-                False,
+                goal_already_rewarded,
+            )
+
+        if goal_already_rewarded:
+            # Episode is over: the completion reward was already paid once.
+            return (
+                StepObservation(
+                    stdout=self._render_a11y_tree(dom),
+                    stderr="Episode already completed; no further reward",
+                    exit_code=0,
+                    structured_data={"url": dom.get("url", "/"), "goal_reached": True},
+                ),
+                0.0,
+                True,
             )
 
         selector = str(payload.get("selector", ""))
@@ -84,20 +99,37 @@ class WebDOMVerifier:
                 dom["url"] = el["navigate_to"]
         else:
             return (
-                StepObservation(stdout="", stderr=f"Unsupported DOM command '{cmd}'", exit_code=2),
+                StepObservation(
+                    stdout="", stderr=f"Unsupported DOM command '{cmd}'", exit_code=2
+                ),
                 0.0,
                 False,
             )
 
         dom["interaction_log"] = history
+        # Re-read elements and goal_conditions in case `on_click_set` updated them
+        elements = dom.get("elements", {})
+        goal_conditions = dom.get("goal_conditions", {})
+        prev_best_matched = int(dom.get("_max_matched_checks", 0))
+
+        reward, terminated, matched_count = self._evaluate_goal(
+            dom, elements, goal_conditions, prev_best_matched
+        )
+        if matched_count > prev_best_matched:
+            dom["_max_matched_checks"] = matched_count
+        if terminated:
+            dom["_goal_rewarded"] = True
+
         branch.write_file("dom_state.json", json.dumps(dom, indent=2))
 
-        reward, terminated = self._evaluate_goal(dom, elements, goal_conditions)
         return (
             StepObservation(
                 stdout=self._render_a11y_tree(dom),
                 exit_code=0,
-                structured_data={"url": dom.get("url", "/"), "goal_reached": terminated},
+                structured_data={
+                    "url": dom.get("url", "/"),
+                    "goal_reached": terminated,
+                },
             ),
             reward,
             terminated,
@@ -119,9 +151,10 @@ class WebDOMVerifier:
         dom: Dict[str, Any],
         elements: Dict[str, Dict[str, Any]],
         goal: Dict[str, Any],
-    ) -> Tuple[float, bool]:
+        prev_best_matched: int = 0,
+    ) -> Tuple[float, bool, int]:
         if not goal:
-            return 0.0, False
+            return 0.0, False, 0
 
         checks = 0
         matched = 0
@@ -142,8 +175,10 @@ class WebDOMVerifier:
                 matched += 1
 
         if checks == 0:
-            return 0.0, False
+            return 0.0, False, 0
 
         if matched == checks:
-            return 1.0, True
-        return round((matched / checks) * 0.5, 4), False
+            return 1.0, True, matched
+        if matched > prev_best_matched:
+            return round((matched / checks) * 0.5, 4), False, matched
+        return 0.0, False, matched
