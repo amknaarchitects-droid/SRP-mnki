@@ -1,10 +1,16 @@
 """
-SRP Dual-Runtime CoW Sandbox Engine
-===================================
-Provides two isolated execution tiers operating strictly against the volatile
-Copy-on-Write (CoW) RAM Arena:
-  - Tier 1 (`wasm_cow`): Ultra-fast capability-based in-memory execution (<0.5ms fork).
-  - Tier 2 (`container_tmpfs`): Isolated RAM-mounted tmpfs workspace execution.
+SRP Sandbox Runtime Tiers
+=========================
+Both tiers operate strictly against the volatile Copy-on-Write (CoW) RAM Arena.
+
+  - `wasm_cow`: in-process verifiers for declarative suites (math, web, CAD)
+    whose actions are data, never code. Code-executing suites always delegate
+    to the isolated subprocess sandbox in `srp.envs.sandbox`.
+  - `container_tmpfs`: same verifier dispatch; on hosts with an OCI runtime this
+    tier is where a container / microVM backend plugs in.
+
+Security model: agent-supplied *code* never executes inside the node daemon's
+process. See `srp/envs/sandbox.py` for the isolation guarantees and limits.
 """
 
 from __future__ import annotations
@@ -16,56 +22,34 @@ from srp.node.ram_arena import CoWBranch
 from srp.protocol.messages import ActionPayload, StepObservation
 
 
-class WasmCoWRuntime:
-    """
-    Tier-1 Capability-Restricted In-Memory Sandbox Runtime.
-    Executes verifier transitions directly inside the CoWBranch's 4KB page table
-    with zero host filesystem or network syscalls.
-    """
+class _VerifierDispatchRuntime:
+    runtime_id = ""
+
+    def execute_step(
+        self, branch: CoWBranch, action: ActionPayload, timeout_ms: int = 5000
+    ) -> Tuple[StepObservation, float, bool]:
+        verifier = VERIFIER_REGISTRY.get(branch.suite)
+        if verifier is None:
+            return (
+                StepObservation(
+                    stdout="", stderr=f"Unsupported verifier suite '{branch.suite}'", exit_code=2
+                ),
+                0.0,
+                False,
+            )
+        return verifier.step(branch, action, timeout_ms=timeout_ms)
+
+
+class WasmCoWRuntime(_VerifierDispatchRuntime):
+    """Tier-1 capability-restricted in-memory runtime."""
 
     runtime_id = "wasm_cow"
 
-    def execute_step(
-        self, branch: CoWBranch, action: ActionPayload
-    ) -> Tuple[StepObservation, float, bool]:
-        verifier = VERIFIER_REGISTRY.get(branch.suite)
-        if verifier is None:
-            return (
-                StepObservation(
-                    stdout="",
-                    stderr=f"Unsupported verifier suite '{branch.suite}'",
-                    exit_code=2,
-                ),
-                0.0,
-                False,
-            )
-        return verifier.step(branch, action)
 
-
-class IsolatedTmpfsContainerRuntime:
-    """
-    Tier-2 Isolated tmpfs / MicroVM Runtime.
-    Mirrors the CoW branch inside an ephemeral, network-disabled RAM-mounted
-    namespace (`tmpfs`) with strict memory limits and zero persistent disk writes.
-    """
+class IsolatedTmpfsContainerRuntime(_VerifierDispatchRuntime):
+    """Tier-2 isolated runtime (container / microVM backend plug-in point)."""
 
     runtime_id = "container_tmpfs"
-
-    def execute_step(
-        self, branch: CoWBranch, action: ActionPayload
-    ) -> Tuple[StepObservation, float, bool]:
-        verifier = VERIFIER_REGISTRY.get(branch.suite)
-        if verifier is None:
-            return (
-                StepObservation(
-                    stdout="",
-                    stderr=f"Unsupported verifier suite '{branch.suite}'",
-                    exit_code=2,
-                ),
-                0.0,
-                False,
-            )
-        return verifier.step(branch, action)
 
 
 RUNTIME_ENGINES = {

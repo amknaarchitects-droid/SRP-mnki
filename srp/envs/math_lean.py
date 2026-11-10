@@ -27,10 +27,10 @@ class MathLeanVerifier:
     suite_name = "srp-env-math"
 
     def step(
-        self, branch: CoWBranch, action: ActionPayload
+        self, branch: CoWBranch, action: ActionPayload, timeout_ms: int = 5000
     ) -> Tuple[StepObservation, float, bool]:
         cmd = action.command
-        payload: Dict[str, Any] = action.payload
+        payload: Dict[str, Any] = action.payload if isinstance(action.payload, dict) else {}
 
         try:
             raw_state = branch.read_file("theorem_state.json")
@@ -49,9 +49,15 @@ class MathLeanVerifier:
         goals: List[str] = list(state.get("goals", []))
         valid_rules: Dict[str, List[str]] = state.get("tactic_transitions", {})
         proof_trace: List[str] = list(state.get("proof_trace", []))
+        visited_states: List[str] = list(
+            state.get("visited_goal_states", ["||".join(goals)])
+        )
 
         if cmd == "inspect_goals":
-            formatted = "\n".join(f"Goal {i+1}: {g}" for i, g in enumerate(goals)) or "No goals."
+            formatted = (
+                "\n".join(f"Goal {i+1}: {g}" for i, g in enumerate(goals))
+                or "No goals."
+            )
             return (
                 StepObservation(
                     stdout=formatted,
@@ -64,9 +70,10 @@ class MathLeanVerifier:
         if cmd == "apply_tactic":
             tactic = str(payload.get("tactic", "")).strip()
             if not goals:
+                # The completion reward is paid exactly once, on the closing tactic.
                 return (
                     StepObservation(stdout="Goals already accomplished!", exit_code=0),
-                    1.0,
+                    0.0,
                     True,
                 )
 
@@ -94,9 +101,15 @@ class MathLeanVerifier:
                     False,
                 )
 
+            new_goal_sig = "||".join(new_goals)
+            is_novel_state = new_goal_sig not in visited_states
+            if is_novel_state:
+                visited_states.append(new_goal_sig)
+
             proof_trace.append(tactic)
             state["goals"] = new_goals
             state["proof_trace"] = proof_trace
+            state["visited_goal_states"] = visited_states
 
             # Write updated proof state & Lean script into CoW RAM delta pages
             branch.write_file("theorem_state.json", json.dumps(state, indent=2))
@@ -113,9 +126,17 @@ class MathLeanVerifier:
                     True,
                 )
 
-            # Partial progress reward for discharging a sub-goal
-            progress_reward = 0.25 if len(new_goals) < len(goals) else 0.1
-            remaining_str = "\n".join(f"Goal {i+1}: {g}" for i, g in enumerate(new_goals))
+            # Award partial progress reward only when reaching a novel proof state
+            if not is_novel_state:
+                progress_reward = 0.0
+            elif len(new_goals) < len(goals):
+                progress_reward = 0.25
+            else:
+                progress_reward = 0.1
+
+            remaining_str = "\n".join(
+                f"Goal {i+1}: {g}" for i, g in enumerate(new_goals)
+            )
             return (
                 StepObservation(
                     stdout=f"Tactic '{tactic}' succeeded.\n{remaining_str}",
@@ -127,7 +148,9 @@ class MathLeanVerifier:
             )
 
         return (
-            StepObservation(stdout="", stderr=f"Unknown math command '{cmd}'", exit_code=2),
+            StepObservation(
+                stdout="", stderr=f"Unknown math command '{cmd}'", exit_code=2
+            ),
             0.0,
             False,
         )
@@ -136,13 +159,29 @@ class MathLeanVerifier:
     def _check_builtin_algebraic_tactic(goal: str, tactic: str) -> bool:
         """Built-in lightweight reflexivity / symmetry / omega verifier."""
         norm_goal = goal.replace(" ", "")
-        if tactic in ("rfl", "refl", "ring", "omega"):
-            if "=" in norm_goal:
-                lhs, rhs = norm_goal.split("=", 1)
-                if lhs == rhs:
-                    return True
-                # Commutative addition check e.g. a+b = b+a
-                if "+" in lhs and "+" in rhs:
-                    if sorted(lhs.split("+")) == sorted(rhs.split("+")):
+        # Reject non-equality relational operators before splitting on '='
+        if any(op in norm_goal for op in ("!=", "<=", ">=", "==")):
+            return False
+        if norm_goal.count("=") != 1:
+            return False
+
+        lhs, rhs = norm_goal.split("=", 1)
+        if not lhs or not rhs:
+            return False
+
+        if tactic in ("rfl", "refl"):
+            return lhs == rhs
+
+        if tactic in ("ring", "omega"):
+            if lhs == rhs:
+                return True
+            # Associative/commutative addition check (strip grouping parentheses when only '+' is present)
+            if "+" in lhs and "+" in rhs:
+                if not any(op in norm_goal for op in ("-", "*", "/", "^")):
+                    clean_lhs = lhs.replace("(", "").replace(")", "")
+                    clean_rhs = rhs.replace("(", "").replace(")", "")
+                    terms_l = [t for t in clean_lhs.split("+") if t]
+                    terms_r = [t for t in clean_rhs.split("+") if t]
+                    if terms_l and sorted(terms_l) == sorted(terms_r):
                         return True
         return False

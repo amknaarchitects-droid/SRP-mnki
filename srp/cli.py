@@ -105,7 +105,7 @@ def build_default_manifests() -> Dict[str, SnapshotManifest]:
     cad_manifest = SnapshotManifest(
         snapshot_id="snap_cad_pedestal_v1",
         suite="srp-env-spatial",
-        runtime=" container_tmpfs".strip(),
+        runtime="container_tmpfs",
         initial_files={
             "kernel_tables.dat": "BREP_TESSELLATION_LUT_" + ("C" * 12288),
             "cad_scene.json": json.dumps(
@@ -134,7 +134,7 @@ def build_default_manifests() -> Dict[str, SnapshotManifest]:
 
 def run_demo() -> None:
     print("=" * 78)
-    print("  SHARE RAM PROTOCOL (SRP v0.1.0) — PUBLIC GOOD RL VERIFIER FABRIC DEMO")
+    print("  SHARE RAM PROTOCOL (SRP v0.3.0) — PUBLIC GOOD RL VERIFIER FABRIC DEMO")
     print("=" * 78)
 
     # Initialize Coordinator with TokenEscrowLedger (or Fiat/Karma)
@@ -219,7 +219,7 @@ def run_demo() -> None:
             {
                 "primitive": {
                     "type": "box",
-                    "center": [0.0, 0.0, 6.0],
+                    "center": [0.0, 0.0, 7.0],
                     "size": [8.0, 10.0, 10.0],
                 }
             },
@@ -229,8 +229,11 @@ def run_demo() -> None:
 
     # 6. Telemetry & CoW RAM Savings Report
     telemetry = coordinator.cluster_telemetry()
+    active_branches = sum(
+        int(n["active_branches"]) for n in telemetry["nodes"].values()
+    )
     print("\n[6] Cluster Copy-on-Write (CoW) RAM Efficiency & Settlement Report:")
-    print(f"    -> Active CoW Branches Held in RAM : 19")
+    print(f"    -> Active CoW Branches Held in RAM : {active_branches}")
     print(f"    -> Unshared Logical Memory         : {telemetry['cluster_logical_bytes'] / 1024:.1f} KB")
     print(f"    -> Actual Physical RAM Used        : {telemetry['cluster_used_ram_bytes'] / 1024:.1f} KB")
     print(f"    -> CoW RAM Bandwidth/Memory Saved  : {telemetry['cluster_cow_savings_percent']}%")
@@ -239,14 +242,46 @@ def run_demo() -> None:
     print("=" * 78)
 
 
+def run_benchmark(branches: int = 64) -> None:
+    print("=" * 78)
+    print(f"  SRP v0.3.0 — COPY-ON-WRITE FORK & VERIFIER BENCHMARK ({branches} BRANCHES)")
+    print("=" * 78)
+    coordinator = SRPCoordinator()
+    node = SRPProviderNode(node_id="bench_node", ram_capacity_mb=1024)
+    coordinator.register_node(node)
+
+    manifests = build_default_manifests()
+    coordinator.broadcast_snapshot(manifests["math"])
+
+    branch_ids, fork_ms = coordinator.fork("snap_lean4_algebra_v1", count=branches)
+    for i, bid in enumerate(branch_ids):
+        tactic = "rw [Nat.add_assoc]" if i % 2 == 0 else "omega"
+        coordinator.step(bid, ActionPayload("apply_tactic", {"tactic": tactic}))
+
+    telemetry = coordinator.cluster_telemetry()
+    print(f"  Forked {branches} CoW branches in : {fork_ms:.3f} ms ({fork_ms / max(1, branches):.4f} ms/branch)")
+    print(f"  Unshared Logical Memory        : {telemetry['cluster_logical_bytes'] / 1024:.1f} KB")
+    print(f"  Actual Physical RAM Used       : {telemetry['cluster_used_ram_bytes'] / 1024:.1f} KB")
+    print(f"  CoW RAM Savings                : {telemetry['cluster_cow_savings_percent']}%")
+    print("=" * 78)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Share RAM Protocol (SRP) CLI")
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("demo", help="Run the full 4-suite CoW RL verification & settlement demo")
+    bench_parser = sub.add_parser(
+        "benchmark", help="Run a multi-branch CoW fork and verifier throughput benchmark"
+    )
+    bench_parser.add_argument(
+        "--branches", type=int, default=64, help="Number of parallel CoW branches to fork"
+    )
     args = parser.parse_args()
 
     if args.cmd in (None, "demo"):
         run_demo()
+    elif args.cmd == "benchmark":
+        run_benchmark(branches=args.branches)
     else:
         parser.print_help()
         sys.exit(1)

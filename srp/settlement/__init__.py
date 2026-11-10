@@ -1,5 +1,6 @@
 """Settlement package init."""
 from srp.settlement.base import (
+    EpochPayout,
     SettlementAccount,
     SettlementProvider,
     SettlementReceipt,
@@ -9,6 +10,7 @@ from srp.settlement.base import (
 )
 
 __all__ = [
+    "EpochPayout",
     "SettlementAccount",
     "SettlementProvider",
     "SettlementReceipt",

@@ -9,6 +9,7 @@ Drop-in adapters for:
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 from srp.coordinator.server import SRPCoordinator
@@ -28,26 +29,30 @@ class SRPEnv:
         snapshot_id: str,
         branch_id: Optional[str] = None,
     ) -> None:
+        self._lock = threading.RLock()
         self.coordinator = coordinator
         self.snapshot_id = snapshot_id
         self.branch_id = branch_id
 
     def reset(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        if self.branch_id is not None:
-            self.coordinator.evict_branch(self.branch_id)
-        branch_ids, fork_ms = self.coordinator.fork(self.snapshot_id, count=1)
-        self.branch_id = branch_ids[0]
-        return (
-            {"branch_id": self.branch_id, "snapshot_id": self.snapshot_id},
-            {"fork_latency_ms": fork_ms},
-        )
+        with self._lock:
+            if self.branch_id is not None:
+                self.coordinator.evict_branch(self.branch_id)
+            branch_ids, fork_ms = self.coordinator.fork(self.snapshot_id, count=1)
+            self.branch_id = branch_ids[0]
+            return (
+                {"branch_id": self.branch_id, "snapshot_id": self.snapshot_id},
+                {"fork_latency_ms": fork_ms},
+            )
 
     def step(
         self, action: ActionPayload | Dict[str, Any]
     ) -> Tuple[Dict[str, Any], float, bool, bool, Dict[str, Any]]:
-        if self.branch_id is None:
-            self.reset()
-        assert self.branch_id is not None
+        with self._lock:
+            if self.branch_id is None:
+                self.reset()
+            assert self.branch_id is not None
+            bid = self.branch_id
 
         if isinstance(action, dict):
             act_obj = ActionPayload(
@@ -57,7 +62,7 @@ class SRPEnv:
         else:
             act_obj = action
 
-        res: StepResult = self.coordinator.step(self.branch_id, act_obj)
+        res: StepResult = self.coordinator.step(bid, act_obj)
         obs = {
             "stdout": res.observation.stdout,
             "stderr": res.observation.stderr,
@@ -69,6 +74,7 @@ class SRPEnv:
             "branch_id": res.branch_id,
             "exec_time_ms": res.metrics.exec_time_ms,
             "dirty_pages": res.metrics.dirty_pages,
+            "step_dirty_pages": res.metrics.step_dirty_pages,
             "dirty_bytes": res.metrics.dirty_bytes,
             "receipt": res.receipt,
         }
@@ -79,8 +85,9 @@ class SRPEnv:
         Branch the current mid-rollout environment state into `count` independent
         Copy-on-Write child environments in sub-millisecond time.
         """
-        source = self.branch_id or self.snapshot_id
-        child_ids, _ = self.coordinator.fork(source_id=source, count=count)
+        with self._lock:
+            source = self.branch_id or self.snapshot_id
+            child_ids, _ = self.coordinator.fork(source_id=source, count=count)
         return [
             SRPEnv(
                 coordinator=self.coordinator,
@@ -91,9 +98,10 @@ class SRPEnv:
         ]
 
     def close(self) -> None:
-        if self.branch_id is not None:
-            self.coordinator.evict_branch(self.branch_id)
-            self.branch_id = None
+        with self._lock:
+            if self.branch_id is not None:
+                self.coordinator.evict_branch(self.branch_id)
+                self.branch_id = None
 
 
 class RolloutPool:
@@ -119,25 +127,37 @@ class RolloutPool:
           A_i = (r_i - mean(r)) / (std(r) + 1e-8)
         """
         group_size = len(candidate_actions)
+        if group_size == 0:
+            return {
+                "group_size": 0,
+                "fork_latency_ms": 0.0,
+                "rewards": [],
+                "mean_reward": 0.0,
+                "advantages": [],
+                "results": [],
+                "branch_ids": [],
+            }
+
         branch_ids, fork_ms = self.coordinator.fork(
             source_id=self.snapshot_id, count=group_size
         )
 
         results: List[StepResult] = []
+        completed = False
         try:
             for bid, act in zip(branch_ids, candidate_actions):
                 res = self.coordinator.step(branch_id=bid, action=act)
                 results.append(res)
 
             rewards = [r.reward for r in results]
-            mean_r = sum(rewards) / max(1, len(rewards))
-            var_r = sum((r - mean_r) ** 2 for r in rewards) / max(1, len(rewards))
+            mean_r = sum(rewards) / len(rewards)
+            var_r = sum((r - mean_r) ** 2 for r in rewards) / len(rewards)
             std_r = var_r ** 0.5
             advantages = [
                 round((r - mean_r) / (std_r + 1e-8), 4) if std_r > 1e-8 else 0.0
                 for r in rewards
             ]
-
+            completed = True
             return {
                 "group_size": group_size,
                 "fork_latency_ms": round(fork_ms, 4),
@@ -145,9 +165,10 @@ class RolloutPool:
                 "mean_reward": round(mean_r, 4),
                 "advantages": advantages,
                 "results": results,
+                "branch_ids": list(branch_ids),
             }
         finally:
-            if evict_after:
+            if evict_after or not completed:
                 for bid in branch_ids:
                     self.coordinator.evict_branch(bid)
 
