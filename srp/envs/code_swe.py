@@ -9,6 +9,7 @@ isolated, resource-limited child interpreter in `srp.envs.sandbox`.
 from __future__ import annotations
 
 import ast
+import hashlib
 from typing import Any, Dict, List, Tuple
 
 from srp.envs.sandbox import SandboxPolicyError, run_test_job, validate_code
@@ -17,6 +18,26 @@ from srp.protocol.messages import ActionPayload, StepObservation
 
 PINNED_TEST_FILE = "test_suite.py"
 LOG_FILE = ".last_run.log"
+# Optional snapshot secret mixed into the property-test seed. Hidden and read-only.
+PROPERTY_SALT_FILE = ".srp_property_salt"
+PROTECTED_FILES = (PINNED_TEST_FILE, LOG_FILE, PROPERTY_SALT_FILE)
+
+
+def property_seed(test_code: str, salt: str, target_file: str, solution_code: str) -> int:
+    """
+    Seed for the tests' `srp_randint` / `srp_choice` / `srp_random` helpers.
+
+    It depends on the hidden tests, the hidden salt and the submitted code, so
+    an agent cannot know the inputs before it submits, and every new submission
+    is graded on fresh inputs. It is still a pure function of branch state, so
+    replay audits reproduce it exactly.
+    """
+    h = hashlib.sha256()
+    for part in ("SRP_PROPERTY_SEED_V1", test_code, salt, target_file, solution_code):
+        data = part.encode("utf-8")
+        h.update(len(data).to_bytes(8, "big"))
+        h.update(data)
+    return int.from_bytes(h.digest()[:8], "big")
 
 
 def _validate_ast_safety(code_str: str) -> ast.AST:
@@ -30,7 +51,10 @@ class CodeSWEVerifier:
     Supports commands:
       - `apply_patch` / `submit_code`: write source to `solution.py` (or another
         non-test path) in CoW RAM, then run the pinned `test_suite.py`.
-      - `read_file`: read a file from the CoW branch.
+      - `read_file`: read a file from the CoW branch (grading files are hidden).
+
+    Pinned tests may call `srp_randint(lo, hi)`, `srp_choice(seq)` and
+    `srp_random()` for property-based checks; see `property_seed`.
     """
 
     suite_name = "srp-env-code"
@@ -43,7 +67,7 @@ class CodeSWEVerifier:
 
         if cmd == "read_file":
             target = str(payload.get("path", "solution.py"))
-            if target in (PINNED_TEST_FILE, LOG_FILE):
+            if target in PROTECTED_FILES:
                 # Grading inputs stay hidden so they cannot simply be hard-coded.
                 return (
                     StepObservation(
@@ -84,7 +108,7 @@ class CodeSWEVerifier:
                 0.0,
                 False,
             )
-        if target_file == test_file or target_file == LOG_FILE:
+        if target_file in PROTECTED_FILES:
             return (
                 StepObservation(
                     stdout="",
@@ -110,6 +134,11 @@ class CodeSWEVerifier:
         # Mutate the CoW branch in volatile RAM after validation succeeds
         branch.write_file(target_file, new_code)
 
+        try:
+            salt = branch.read_file(PROPERTY_SALT_FILE)
+        except FileNotFoundError:
+            salt = ""
+
         declared_test_names: List[str] = [
             node.name
             for node in getattr(test_tree, "body", [])
@@ -132,6 +161,7 @@ class CodeSWEVerifier:
             solution_path=target_file,
             test_path=test_file,
             timeout_ms=timeout_ms,
+            test_seed=property_seed(test_code, salt, target_file, new_code),
         )
         stdout = result["stdout"]
         meta = {

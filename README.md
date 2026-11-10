@@ -1,7 +1,7 @@
 # Share RAM Protocol (SRP)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Protocol Version](https://img.shields.io/badge/SRP-v0.3.0-brightgreen.svg)](spec/SRP-001-wire-protocol.md)
+[![Protocol Version](https://img.shields.io/badge/SRP-v0.4.0-brightgreen.svg)](spec/SRP-001-wire-protocol.md)
 [![Protocol Tax](https://img.shields.io/badge/Protocol_Fee-0%25_Forever-orange.svg)](spec/SRP-004-settlement-api.md)
 
 > **An Open-Source Public Good for Humanity:** Turn the world's spare consumer and workstation RAM into a zero-disk-wear, Copy-on-Write (CoW) in-memory execution and verification fabric for AI Reinforcement Learning (RL) post-training.
@@ -91,7 +91,7 @@ SRP is a public good with **0% protocol fees** and is completely agnostic to how
 
 ---
 
-## Security Model (v0.3.0)
+## Security Model (v0.4.0)
 
 | Layer | What it guarantees |
 |---|---|
@@ -100,14 +100,15 @@ SRP is a public good with **0% protocol fees** and is completely agnostic to how
 | **Correctness** | Blind, incremental replay audits on an auditor with the same runtime profile. Every committed step since the last checkpoint is re-checked, and rewarded, terminal and timed-out steps are always audited. A mismatch must be confirmed by repeated runs. Canaries run at random depths. |
 | **Evidence** | Slashable fraud proofs are self-contained (signed receipt + lineage), and anyone can re-check them with `verify_fraud_proof_by_replay`. Appeals can reinstate a node and refund its slash. |
 | **RAM residency** | Chained (pointer-chasing) challenges over time-memory-hard, node-unique ballast, with the RTT baseline subtracted. Only proven ballast bytes earn lease. |
-| **Agent code** | Static policy, deterministic fuel, process isolation, an audit hook blocking every CPython audit event, and address scrubbing. The tests run in a separate namespace and the test file is hidden. On Linux, the sandbox also adds a network namespace, seccomp-BPF, no-ASLR and rlimits. |
-| **Transport** | `srp/transport`: Ed25519-signed commands (with timestamp and single-use nonce), signed responses, strict schema validation, deadlines, optional TLS. |
+| **Agent code** | Static policy, deterministic fuel, process isolation, an audit hook blocking every CPython audit event, address scrubbing, and hash-order-deterministic sets. The tests run in a separate namespace and the test file is hidden. On Linux, the sandbox also adds a network namespace, seccomp-BPF (x86_64 and aarch64), no-ASLR and rlimits. |
+| **Grading** | Pinned tests can use seeded property helpers (`srp_randint`, `srp_choice`, `srp_random`). The seed depends on a hidden salt and the submitted code, so visible examples cannot simply be hard-coded. |
+| **Transport** | `srp/transport`: Ed25519-signed commands (with timestamp and single-use nonce), signed responses, strict schema validation, deadlines, and optional TLS/mTLS (tested), with handshakes off the accept thread. |
 | **Economics** | Stake with unbonding, slashing from unsettled balance and then stake, quarantine, and epoch-bound payout Merkle roots. |
 
 **Known limits:**
 - Windows nodes have no kernel-level network filter. Set `require_kernel_isolation=True` to admit only Linux nodes.
 - Determinism is guaranteed only within a runtime profile.
-- Fixed unit tests can still be over-fitted.
+- Property tests only help if snapshot authors write them.
 
 The protocol is **alpha**: get an external security review before running it permissionlessly. [SRP-003 §5](spec/SRP-003-proof-of-ram.md) lists these residual risks.
 

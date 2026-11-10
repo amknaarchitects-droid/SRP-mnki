@@ -1,5 +1,5 @@
 """
-Security & integrity regression tests (SRP v0.3.0).
+Security & integrity regression tests (SRP v0.4.0).
 Each test names the audit finding it pins down. Tests that need Linux kernel
 features return early elsewhere (they are exercised in CI on Linux).
 """
@@ -577,7 +577,7 @@ def test_wire_codec_roundtrip_preserves_signed_receipts():
     ],
 )
 def test_wire_codec_rejects_malformed_frames(body):
-    frame = '{"jsonrpc":"2.0","id":"1","method":"SRP_FORK","params":{"srp_version":"0.3.0","body":%s}}' % body
+    frame = '{"jsonrpc":"2.0","id":"1","method":"SRP_FORK","params":{"srp_version":"0.4.0","body":%s}}' % body
     with pytest.raises(WireError):
         decode_message(frame)
     with pytest.raises(WireError):

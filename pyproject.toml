@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "share-ram-protocol"
-version = "0.3.0"
+version = "0.4.0"
 description = "Share RAM Protocol (SRP): Open-source decentralized Copy-on-Write in-memory RL environment execution and verification fabric."
 readme = "README.md"
 license = { text = "MIT" }

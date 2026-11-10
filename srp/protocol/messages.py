@@ -98,7 +98,7 @@ class NodeCapabilities:
         ]
     )
     public_key_hex: str = ""  # Ed25519 public key (32 bytes, hex)
-    protocol_version: str = "0.3.0"
+    protocol_version: str = "0.4.0"
     runtime_profile: str = field(default_factory=current_runtime_profile)
     sandbox_isolation: Dict[str, Any] = field(default_factory=dict)
 

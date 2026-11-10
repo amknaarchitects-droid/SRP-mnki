@@ -50,6 +50,7 @@ from srp.protocol.wire import MAX_FRAME_BYTES, WireError, decode_body, loads_str
 
 RPC_PATH = "/srp/v1"
 MAX_CLOCK_SKEW_S = 60.0
+CONNECTION_TIMEOUT_S = 30.0  # per-connection socket timeout (slow clients / stalled TLS)
 _ALLOWED_ERRORS = {
     "KeyError": KeyError, "PermissionError": PermissionError, "MemoryError": MemoryError,
     "ValueError": ValueError, "RuntimeError": RuntimeError, "WireError": WireError,
@@ -82,6 +83,30 @@ class _NonceCache:
             return True
 
 
+class _TLSThreadingHTTPServer(ThreadingHTTPServer):
+    """
+    Threading HTTP(S) server that performs the TLS handshake in the
+    per-connection worker thread, under that connection's socket timeout.
+
+    Wrapping the *listening* socket would run the handshake inside `accept()`
+    on the single serve thread, so one client that connects and never sends a
+    ClientHello would stall every other request.
+    """
+
+    def __init__(self, addr, handler, ssl_context: Optional[ssl.SSLContext]) -> None:
+        self.ssl_context = ssl_context
+        super().__init__(addr, handler)
+
+    def get_request(self):
+        sock, addr = super().get_request()
+        if self.ssl_context is not None:
+            sock = self.ssl_context.wrap_socket(sock, server_side=True, do_handshake_on_connect=False)
+        return sock, addr
+
+    def handle_error(self, request, client_address) -> None:  # failed handshakes are routine
+        pass
+
+
 class NodeServer:
     """Serve an SRPProviderNode to exactly one authorised coordinator key."""
 
@@ -93,6 +118,7 @@ class NodeServer:
         port: int = 0,
         ssl_context: Optional[ssl.SSLContext] = None,
         max_clock_skew_s: float = MAX_CLOCK_SKEW_S,
+        connection_timeout_s: float = CONNECTION_TIMEOUT_S,
     ) -> None:
         self.node = node
         self.coordinator_key = coordinator_public_key_hex
@@ -103,6 +129,12 @@ class NodeServer:
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
+            timeout = connection_timeout_s  # applied to the socket in setup()
+
+            def setup(self) -> None:
+                super().setup()  # sets the socket timeout first
+                if isinstance(self.connection, ssl.SSLSocket):
+                    self.connection.do_handshake()  # in this worker thread, under the timeout
 
             def log_message(self, *args: Any) -> None:  # keep stdout quiet
                 pass
@@ -116,10 +148,8 @@ class NodeServer:
                 self.end_headers()
                 self.wfile.write(raw)
 
-        self._httpd = ThreadingHTTPServer((host, port), Handler)
+        self._httpd = _TLSThreadingHTTPServer((host, port), Handler, ssl_context)
         self._httpd.daemon_threads = True
-        if ssl_context is not None:
-            self._httpd.socket = ssl_context.wrap_socket(self._httpd.socket, server_side=True)
         self._scheme = "https" if ssl_context is not None else "http"
         self._thread: Optional[threading.Thread] = None
 

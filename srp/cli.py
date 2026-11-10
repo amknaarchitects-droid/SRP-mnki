@@ -134,7 +134,7 @@ def build_default_manifests() -> Dict[str, SnapshotManifest]:
 
 def run_demo() -> None:
     print("=" * 78)
-    print("  SHARE RAM PROTOCOL (SRP v0.3.0) — PUBLIC GOOD RL VERIFIER FABRIC DEMO")
+    print("  SHARE RAM PROTOCOL (SRP v0.4.0) — PUBLIC GOOD RL VERIFIER FABRIC DEMO")
     print("=" * 78)
 
     # Initialize Coordinator with TokenEscrowLedger (or Fiat/Karma)
@@ -244,7 +244,7 @@ def run_demo() -> None:
 
 def run_benchmark(branches: int = 64) -> None:
     print("=" * 78)
-    print(f"  SRP v0.3.0 — COPY-ON-WRITE FORK & VERIFIER BENCHMARK ({branches} BRANCHES)")
+    print(f"  SRP v0.4.0 — COPY-ON-WRITE FORK & VERIFIER BENCHMARK ({branches} BRANCHES)")
     print("=" * 78)
     coordinator = SRPCoordinator()
     node = SRPProviderNode(node_id="bench_node", ram_capacity_mb=1024)

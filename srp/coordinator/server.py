@@ -62,7 +62,7 @@ from srp.protocol.messages import (
 from srp.protocol.residency import BallastCheckpoints, verify_chain
 from srp.settlement.base import FiatAndApiCreditLedger, SettlementProvider
 
-PROTOCOL_VERSION = "0.3.0"
+PROTOCOL_VERSION = "0.4.0"
 
 
 # --------------------------------------------------------------------------- #

@@ -11,8 +11,8 @@ Layers of defence, applied on every grading run:
   2. Deterministic fuel metering (`srp.envs.fuel`): loops, calls,
      comprehensions, iteration-consuming builtins and big-integer/sequence
      arithmetic are charged against a budget derived from `timeout_ms`.
-  3. Process isolation: a fresh `python -I -S` child with an empty environment,
-     `PYTHONHASHSEED=0`, a minimal builtins dict, and job input on stdin.
+  3. Process isolation: a fresh `python -s -S [-P]` child (see `child_argv`)
+     with a controlled environment that pins `PYTHONHASHSEED=0`, a minimal builtins dict, and job input on stdin.
   4. In-interpreter audit hook (all platforms): once armed, *every* CPython
      audit event is refused (imports, open, socket.*, subprocess, os.*,
      ctypes, sys._getframe, restricted attribute reads such as gi_frame /
@@ -22,7 +22,7 @@ Layers of defence, applied on every grading run:
        Linux:   new user + network namespace (no interfaces at all), ASLR
                 disabled (deterministic addresses), rlimits (address space,
                 CPU, zero file size, no extra processes, few fds, no core),
-                and a seccomp-BPF filter (x86_64) denying network, process
+                and a seccomp-BPF filter (x86_64, aarch64) denying network, process
                 creation, exec, ptrace, namespace/mount changes, kernel
                 module/BPF/keyring calls and every write-capable open/rename/
                 unlink/mkdir/chmod/truncate.
@@ -161,15 +161,89 @@ class _ScrubInstrumenter(ast.NodeTransformer):
         return node
 
 
+# --------------------------------------------------------------------------- #
+# Hash-order determinism instrumentation (runs after validation)               #
+# --------------------------------------------------------------------------- #
+# Set iteration order follows element hashes. For functions, types, exceptions,
+# iterators, NaN (and None before 3.12) the hash is the object's *address*, so
+# `for f in {f1, f2}` can run in a different order on the node and on its
+# auditor. Every way agent code can build or grow a set is routed through the
+# child's `_DetSet` / `_DetFrozen`, which refuse such elements up front.
+_SETNEW = "__srp_set__"
+_SETOP = "__srp_setop__"
+_SETIOP = "__srp_setiop__"
+_SETTMP = "__srp_t__"
+_SET_OPS = {ast.BitOr: "|", ast.BitAnd: "&", ast.BitXor: "^", ast.Sub: "-"}
+
+
+def _hook_call(name: str, args) -> ast.Call:
+    return ast.Call(func=ast.Name(id=name, ctx=ast.Load()), args=list(args), keywords=[])
+
+
+class _DeterminismInstrumenter(ast.NodeTransformer):
+    def visit_Set(self, node: ast.Set):
+        self.generic_visit(node)
+        return ast.copy_location(_hook_call(_SETNEW, [ast.List(elts=node.elts, ctx=ast.Load())]), node)
+
+    def visit_SetComp(self, node: ast.SetComp):
+        self.generic_visit(node)
+        lc = ast.ListComp(elt=node.elt, generators=node.generators)
+        return ast.copy_location(_hook_call(_SETNEW, [lc]), node)
+
+    def visit_BinOp(self, node: ast.BinOp):
+        self.generic_visit(node)
+        op = _SET_OPS.get(type(node.op))
+        if op is None:
+            return node
+        return ast.copy_location(_hook_call(_SETOP, [ast.Constant(op), node.left, node.right]), node)
+
+    def visit_AugAssign(self, node: ast.AugAssign):
+        self.generic_visit(node)
+        op = _SET_OPS.get(type(node.op))
+        if op is None:
+            return node
+        code = ast.Constant(op)
+        tgt = node.target
+        if isinstance(tgt, ast.Name):
+            new = ast.Assign(
+                targets=[ast.Name(id=tgt.id, ctx=ast.Store())],
+                value=_hook_call(_SETIOP, [code, ast.Name(id=tgt.id, ctx=ast.Load()), node.value]),
+            )
+            return ast.copy_location(new, node)
+        # a[i] op= v  ->  t = (a, i); t[0][t[1]] = iop(op, t[0][t[1]], v)
+        # a.n  op= v  ->  t = a;      t.n       = iop(op, t.n, v)
+        # (container and key are evaluated once, in the original order)
+        def tmp(i=None):
+            n = ast.Name(id=_SETTMP, ctx=ast.Load())
+            return n if i is None else ast.Subscript(value=n, slice=ast.Constant(i), ctx=ast.Load())
+
+        if isinstance(tgt, ast.Subscript):
+            save = ast.Assign(
+                targets=[ast.Name(id=_SETTMP, ctx=ast.Store())],
+                value=ast.Tuple(elts=[tgt.value, tgt.slice], ctx=ast.Load()),
+            )
+            read = ast.Subscript(value=tmp(0), slice=tmp(1), ctx=ast.Load())
+            store = ast.Subscript(value=tmp(0), slice=tmp(1), ctx=ast.Store())
+        elif isinstance(tgt, ast.Attribute):
+            save = ast.Assign(targets=[ast.Name(id=_SETTMP, ctx=ast.Store())], value=tgt.value)
+            read = ast.Attribute(value=tmp(), attr=tgt.attr, ctx=ast.Load())
+            store = ast.Attribute(value=tmp(), attr=tgt.attr, ctx=ast.Store())
+        else:  # pragma: no cover - the grammar allows no other augmented targets
+            return node
+        write = ast.Assign(targets=[store], value=_hook_call(_SETIOP, [code, read, node.value]))
+        return [ast.copy_location(save, node), ast.copy_location(write, node)]
+
+
 def prepare_source(tree: ast.Module) -> str:
-    """Instrument a validated AST (scrubbing, then fuel) and return source text."""
+    """Instrument a validated AST (determinism, scrubbing, then fuel); return source text."""
+    tree = _DeterminismInstrumenter().visit(tree)
     tree = _ScrubInstrumenter().visit(tree)
     ast.fix_missing_locations(tree)
     return fuel.instrument(tree)
 
 
 # --------------------------------------------------------------------------- #
-# Linux seccomp-BPF policy (x86_64)                                            #
+# Linux seccomp-BPF policy (x86_64 and aarch64)                                #
 # --------------------------------------------------------------------------- #
 # Denied with EPERM. Everything else (read/write on existing fds, mmap/brk,
 # futex, exit_group, clock, ...) is allowed so the interpreter can run.
@@ -186,6 +260,7 @@ SECCOMP_DENY_X86_64 = {
     82: "rename", 264: "renameat", 316: "renameat2", 83: "mkdir", 258: "mkdirat",
     84: "rmdir", 86: "link", 265: "linkat", 87: "unlink", 263: "unlinkat",
     88: "symlink", 266: "symlinkat", 90: "chmod", 91: "fchmod", 268: "fchmodat",
+    452: "fchmodat2",
     92: "chown", 93: "fchown", 94: "lchown", 260: "fchownat", 133: "mknod", 259: "mknodat",
     # namespaces, mounts, kernel attack surface
     165: "mount", 166: "umount2", 272: "unshare", 308: "setns", 155: "pivot_root",
@@ -196,32 +271,78 @@ SECCOMP_DENY_X86_64 = {
     135: "personality", 319: "memfd_create", 323: "userfaultfd",
 }
 SECCOMP_OPENAT_X86_64 = 257
+
+# aarch64 uses the asm-generic table: there is no open/creat/fork/vfork/mkdir/
+# unlink/rename/chmod/chown, only their *at / clone forms.
+SECCOMP_DENY_AARCH64 = {
+    # network
+    198: "socket", 199: "socketpair", 200: "bind", 201: "listen", 202: "accept",
+    203: "connect", 206: "sendto", 207: "recvfrom", 208: "setsockopt", 210: "shutdown",
+    211: "sendmsg", 212: "recvmsg", 242: "accept4", 243: "recvmmsg", 269: "sendmmsg",
+    # process creation / exec / tracing
+    220: "clone", 221: "execve", 281: "execveat", 435: "clone3",
+    129: "kill", 117: "ptrace", 270: "process_vm_readv", 271: "process_vm_writev",
+    # filesystem mutation
+    437: "openat2", 45: "truncate", 46: "ftruncate", 38: "renameat", 276: "renameat2",
+    34: "mkdirat", 37: "linkat", 35: "unlinkat", 36: "symlinkat", 52: "fchmod",
+    53: "fchmodat", 452: "fchmodat2", 54: "fchownat", 55: "fchown", 33: "mknodat",
+    # namespaces, mounts, kernel attack surface
+    40: "mount", 39: "umount2", 97: "unshare", 268: "setns", 41: "pivot_root",
+    51: "chroot", 142: "reboot", 105: "init_module", 273: "finit_module",
+    106: "delete_module", 104: "kexec_load", 294: "kexec_file_load", 280: "bpf",
+    241: "perf_event_open", 217: "add_key", 218: "request_key", 219: "keyctl",
+    425: "io_uring_setup", 426: "io_uring_enter", 427: "io_uring_register",
+    92: "personality", 279: "memfd_create", 282: "userfaultfd",
+}
+SECCOMP_OPENAT_AARCH64 = 56
+
 OPEN_WRITE_FLAGS = 0o1 | 0o2 | 0o100 | 0o1000 | 0o2000  # WRONLY|RDWR|CREAT|TRUNC|APPEND
+
+AUDIT_ARCH_X86_64 = 0xC000003E
+AUDIT_ARCH_AARCH64 = 0xC00000B7
+SECCOMP_RET_KILL = 0x80000000  # SECCOMP_RET_KILL_PROCESS
+SECCOMP_RET_ALLOW = 0x7FFF0000
+SECCOMP_RET_EPERM = 0x00050000 | 1  # SECCOMP_RET_ERRNO | EPERM
+
+_SECCOMP_ARCHES = {
+    "x86_64": (AUDIT_ARCH_X86_64, SECCOMP_DENY_X86_64, SECCOMP_OPENAT_X86_64, True),
+    "aarch64": (AUDIT_ARCH_AARCH64, SECCOMP_DENY_AARCH64, SECCOMP_OPENAT_AARCH64, False),
+}
+_MACHINE_ALIASES = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}
+
+
+def seccomp_arch(machine: Optional[str] = None) -> Optional[str]:
+    """Normalised seccomp architecture for `machine` (default: this host), or None."""
+    return _MACHINE_ALIASES.get((machine or platform.machine()).lower())
+
+
+def seccomp_program(arch: str) -> List[tuple]:
+    """BPF instructions (code, jt, jf, k) implementing the deny policy for `arch`."""
+    LD_W_ABS, JEQ, JGE, JSET, RET = 0x20, 0x15, 0x35, 0x45, 0x06
+    audit_arch, deny, openat_nr, has_x32 = _SECCOMP_ARCHES[arch]
+    prog = [
+        (LD_W_ABS, 0, 0, 4),  # seccomp_data.arch
+        (JEQ, 1, 0, audit_arch),
+        (RET, 0, 0, SECCOMP_RET_KILL),  # any other ABI (x32, compat arm32, ...) dies
+        (LD_W_ABS, 0, 0, 0),  # seccomp_data.nr
+    ]
+    if has_x32:
+        prog += [(JGE, 0, 1, 0x40000000), (RET, 0, 0, SECCOMP_RET_KILL)]  # x32 ABI bit
+    for nr in sorted(deny):
+        prog += [(JEQ, 0, 1, nr), (RET, 0, 0, SECCOMP_RET_EPERM)]
+    prog += [
+        (JEQ, 0, 3, openat_nr),
+        (LD_W_ABS, 0, 0, 16 + 8 * 2),  # low 32 bits of args[2] (flags), little-endian
+        (JSET, 0, 1, OPEN_WRITE_FLAGS),
+        (RET, 0, 0, SECCOMP_RET_EPERM),
+        (RET, 0, 0, SECCOMP_RET_ALLOW),
+    ]
+    return prog
 
 
 def seccomp_program_x86_64() -> List[tuple]:
-    """BPF instructions (code, jt, jf, k) implementing the deny policy."""
-    LD_W_ABS, JEQ, JGE, JSET, RET = 0x20, 0x15, 0x35, 0x45, 0x06
-    KILL, ALLOW, EPERM = 0x80000000, 0x7FFF0000, 0x00050000 | 1
-    AUDIT_ARCH_X86_64 = 0xC000003E
-    prog = [
-        (LD_W_ABS, 0, 0, 4),
-        (JEQ, 1, 0, AUDIT_ARCH_X86_64),
-        (RET, 0, 0, KILL),
-        (LD_W_ABS, 0, 0, 0),
-        (JGE, 0, 1, 0x40000000),  # x32 ABI
-        (RET, 0, 0, KILL),
-    ]
-    for nr in sorted(SECCOMP_DENY_X86_64):
-        prog += [(JEQ, 0, 1, nr), (RET, 0, 0, EPERM)]
-    prog += [
-        (JEQ, 0, 3, SECCOMP_OPENAT_X86_64),
-        (LD_W_ABS, 0, 0, 16 + 8 * 2),  # low 32 bits of args[2] (flags)
-        (JSET, 0, 1, OPEN_WRITE_FLAGS),
-        (RET, 0, 0, EPERM),
-        (RET, 0, 0, ALLOW),
-    ]
-    return prog
+    """Backwards-compatible alias for `seccomp_program("x86_64")`."""
+    return seccomp_program("x86_64")
 
 
 def isolation_report() -> Dict[str, Any]:
@@ -240,7 +361,7 @@ def isolation_report() -> Dict[str, Any]:
         "kernel_network_isolation": False,
     }
     if system == "Linux":
-        report["seccomp"] = platform.machine() in ("x86_64", "AMD64")
+        report["seccomp"] = seccomp_arch() is not None
         report["network_namespace"] = _probe_unshare()
         report["aslr_disabled"] = True
         report["kernel_network_isolation"] = bool(report["network_namespace"] or report["seccomp"])
@@ -255,7 +376,7 @@ def _probe_unshare() -> bool:  # pragma: no cover - Linux only
     if _UNSHARE_OK is None:
         try:
             r = subprocess.run(
-                [sys.executable, "-I", "-S", "-c", "pass"],
+                child_argv("pass"),
                 preexec_fn=_linux_preexec(64, 2, probe=True),
                 capture_output=True,
                 timeout=10,
@@ -270,12 +391,157 @@ def _probe_unshare() -> bool:  # pragma: no cover - Linux only
 # Child interpreter program                                                    #
 # --------------------------------------------------------------------------- #
 _CHILD_PROGRAM = r'''
-import sys, json, re, builtins as _b
+import sys
+# No current-directory / script-directory entries: a planted json.py or re.py
+# next to the node must not be importable (the job of -P / -I).
+sys.path[:] = [p for p in sys.path if p and p != "."]
+import json, re, builtins as _b
 _ADDR = re.compile(r"0x[0-9a-fA-F]{4,}")
 def _scrub_text(s):
     return _ADDR.sub("0x?", s) if isinstance(s, str) else s
 
 ''' + fuel.RUNTIME_SOURCE + r'''
+
+_ID_HASH_MSG = ("sandbox: sets may only hold values with a content-based hash "
+                "(int, float, complex, str, bytes, bool, range, tuples/frozensets of those); "
+                "identity-hashed values make iteration order nondeterministic")
+_DET_ATOMS = {bool, int, str, bytes, range}
+if sys.version_info >= (3, 12):
+    _DET_ATOMS.add(type(None))   # hash(None) is a constant from 3.12 on
+
+def _det_ok(x):
+    t = type(x)
+    if t in _DET_ATOMS:
+        return True
+    if t is float or t is complex:
+        return x == x            # NaN hashes by identity since CPython 3.10
+    if t is tuple:
+        return all(_det_ok(e) for e in x)
+    if t is _DetFrozen:
+        return True
+    if t is frozenset:
+        return all(_det_ok(e) for e in x)
+    return False
+
+def _det_items(iterable):
+    items = list(iterable)
+    for e in items:
+        if not _det_ok(e):
+            raise TypeError(_ID_HASH_MSG)
+    return items
+
+def _det_repr(name, s):
+    body = ", ".join(repr(e) for e in s)
+    if name == "set":
+        return "{" + body + "}" if body else "set()"
+    return "frozenset({" + body + "})" if body else "frozenset()"
+
+class _DetSet(set):
+    __slots__ = ()
+    def __init__(self, iterable=()):
+        set.__init__(self, _det_items(iterable))
+    def __repr__(self):
+        return _det_repr("set", self)
+    def add(self, x):
+        _det_items((x,)); set.add(self, x)
+    def update(self, *others):
+        for o in others:
+            set.update(self, _det_items(o))
+    def symmetric_difference_update(self, other):
+        set.symmetric_difference_update(self, _det_items(other))
+    def __ior__(self, other):
+        if not isinstance(other, (set, frozenset)):
+            return NotImplemented
+        set.update(self, _det_items(other)); return self
+    def __ixor__(self, other):
+        if not isinstance(other, (set, frozenset)):
+            return NotImplemented
+        set.symmetric_difference_update(self, _det_items(other)); return self
+    def union(self, *others):
+        return _DetSet(set.union(self, *[_det_items(o) for o in others]))
+    def symmetric_difference(self, other):
+        return _DetSet(set.symmetric_difference(self, _det_items(other)))
+    def intersection(self, *others):
+        return _DetSet(set.intersection(self, *others))
+    def difference(self, *others):
+        return _DetSet(set.difference(self, *others))
+    def copy(self):
+        return _DetSet(self)
+
+class _DetFrozen(frozenset):
+    __slots__ = ()
+    def __new__(cls, iterable=()):
+        return frozenset.__new__(cls, _det_items(iterable))
+    def __repr__(self):
+        return _det_repr("frozenset", self)
+    def union(self, *others):
+        return _DetFrozen(frozenset.union(self, *[_det_items(o) for o in others]))
+    def symmetric_difference(self, other):
+        return _DetFrozen(frozenset.symmetric_difference(self, _det_items(other)))
+    def intersection(self, *others):
+        return _DetFrozen(frozenset.intersection(self, *others))
+    def difference(self, *others):
+        return _DetFrozen(frozenset.difference(self, *others))
+    def copy(self):
+        return self
+
+def _det_wrap(r):
+    t = type(r)
+    if t is set:
+        return _DetSet(r)
+    if t is frozenset:
+        return _DetFrozen(r)
+    return r
+
+def _ior(a, b):
+    a |= b; return a
+def _iand(a, b):
+    a &= b; return a
+def _ixor(a, b):
+    a ^= b; return a
+def _isub(a, b):
+    a -= b; return a
+_SETOPS = {"|": lambda a, b: a | b, "&": lambda a, b: a & b,
+           "^": lambda a, b: a ^ b, "-": lambda a, b: a - b}
+_SETIOPS = {"|": _ior, "&": _iand, "^": _ixor, "-": _isub}
+
+def _setop(code, a, b):
+    return _det_wrap(_SETOPS[code](a, b))
+def _setiop(code, a, b):
+    return _det_wrap(_SETIOPS[code](a, b))
+def _setnew(items):
+    return _DetSet(items)
+
+_DET_HOOKS = {"__srp_set__": _setnew, "__srp_setop__": _setop, "__srp_setiop__": _setiop}
+
+def _make_rng(seed):
+    """splitmix64: tiny, portable, bit-exact on every platform."""
+    st = [seed & 0xFFFFFFFFFFFFFFFF]
+    M = 0xFFFFFFFFFFFFFFFF
+    def nxt():
+        st[0] = (st[0] + 0x9E3779B97F4A7C15) & M
+        z = st[0]
+        z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & M
+        z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & M
+        return z ^ (z >> 31)
+    def randint(lo, hi):
+        if type(lo) is not int or type(hi) is not int or hi < lo:
+            raise ValueError("srp_randint(lo, hi) needs ints with lo <= hi")
+        span = hi - lo + 1
+        if span > (1 << 64):
+            raise ValueError("srp_randint range too large")
+        limit = (1 << 64) - ((1 << 64) % span)
+        while True:
+            v = nxt()
+            if v < limit:
+                return lo + v % span
+    def choice(seq):
+        if not len(seq):
+            raise IndexError("srp_choice from an empty sequence")
+        return seq[randint(0, len(seq) - 1)]
+    def random():
+        return (nxt() >> 11) * (1.0 / (1 << 53))
+    return {"srp_randint": randint, "srp_choice": choice, "srp_random": random}
 
 def _apply_seccomp(prog):
     import ctypes
@@ -320,6 +586,10 @@ def _run():
                 safe[name] = getattr(_b, name)
         safe["str"] = _ScrubbedStr
         safe["print"] = _print
+        if "set" in safe:
+            safe["set"] = _DetSet
+        if "frozenset" in safe:
+            safe["frozenset"] = _DetFrozen
         return safe
 
     sol_safe = make_builtins()
@@ -356,6 +626,7 @@ def _run():
 
     sol_ns = {"__builtins__": sol_safe, "__srp_scrub__": _scrub_text}
     sol_ns.update(sol_hooks)
+    sol_ns.update(_DET_HOOKS)
     armed[0] = True
     try:
         exec(sol_code, sol_ns)
@@ -363,9 +634,14 @@ def _run():
         # clean namespace: a solution cannot shadow builtins the tests call.
         test_ns = {"__builtins__": test_safe, "__srp_scrub__": _scrub_text}
         test_ns.update(test_hooks)
+        test_ns.update(_DET_HOOKS)
         for k, v in sol_ns.items():
             if not k.startswith("_") and k not in test_safe and k not in job["tests"]:
                 test_ns[k] = v
+        if job.get("test_seed") is not None:
+            # Seeded property-test helpers: tests only (the solution never sees
+            # them), injected last so a solution cannot shadow them.
+            test_ns.update(_make_rng(int(job["test_seed"])))
         exec(test_code, test_ns)
         funcs = [(n, test_ns[n]) for n in job["tests"] if n in test_ns and callable(test_ns[n])]
         res["total"] = len(funcs)
@@ -522,6 +798,25 @@ class _WindowsJob:  # pragma: no cover - Windows only
             self.handle = None
 
 
+def child_argv(program: str) -> List[str]:
+    """
+    Interpreter command line for the sandbox child.
+
+    `-I` would be the obvious choice, but it implies `-E`, which ignores
+    `PYTHONHASHSEED`: str/bytes hashes would then be randomised per run and the
+    iteration order of a set of strings would differ between a node and its
+    auditor. We rebuild `-I` by hand instead: `-s` (no user site), `-S` (no
+    site), `-P` (no unsafe sys.path entry, 3.11+), and a fully controlled
+    environment (`_child_env`), so the only PYTHON* variables the child sees
+    are ours. The child program also strips '' / '.' from sys.path before its
+    first import, which covers 3.10.
+    """
+    argv = [sys.executable, "-s", "-S"]
+    if sys.version_info >= (3, 11):
+        argv.append("-P")
+    return argv + ["-c", program]
+
+
 def _child_env() -> Dict[str, str]:
     env = {"PYTHONHASHSEED": "0", "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1"}
     if os.name == "nt":
@@ -546,6 +841,7 @@ def run_test_job(
     timeout_ms: int = 5000,
     memory_mb: int = DEFAULT_MEMORY_MB,
     recursion_limit: int = 1000,
+    test_seed: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Run `solution_code` then the pinned `test_code` in an isolated child.
@@ -559,7 +855,7 @@ def run_test_job(
     deadline_ms = backstop_ms(timeout_ms)
     cpu_seconds = max(1, -(-deadline_ms // 1000) + 1)
     is_linux = platform.system() == "Linux"
-    use_seccomp = is_linux and platform.machine() in ("x86_64", "AMD64")
+    arch = seccomp_arch() if is_linux else None
 
     job = json.dumps(
         {
@@ -575,7 +871,8 @@ def run_test_job(
             "max_int_bits": fuel.MAX_INT_BITS,
             "max_seq_items": fuel.MAX_SEQ_ITEMS,
             "recursion_limit": int(recursion_limit),
-            "seccomp_prog": seccomp_program_x86_64() if use_seccomp else None,
+            "test_seed": None if test_seed is None else int(test_seed) & 0xFFFFFFFFFFFFFFFF,
+            "seccomp_prog": seccomp_program(arch) if arch else None,
         }
     )
 
@@ -596,7 +893,7 @@ def run_test_job(
 
     timed_out = False
     try:
-        proc = subprocess.Popen([sys.executable, "-I", "-S", "-c", _CHILD_PROGRAM], **popen_kwargs)
+        proc = subprocess.Popen(child_argv(_CHILD_PROGRAM), **popen_kwargs)
         try:
             if win_job is not None:
                 win_job.assign_and_resume(proc)  # nothing runs before the Job applies

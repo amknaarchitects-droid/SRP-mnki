@@ -1,6 +1,6 @@
 # SRP-001: Wire Protocol Specification
 
-**Status:** Draft Standard (v0.3.0)  
+**Status:** Draft Standard (v0.4.0)  
 **Category:** Core Protocol  
 **License:** MIT / Public Domain (CC0)
 
@@ -27,7 +27,7 @@ Every message is a UTF-8 JSON-RPC 2.0 frame (reference codec: `srp/protocol/wire
 
 ```json
 {"jsonrpc": "2.0", "id": "7f3c…", "method": "SRP_STEP",
- "params": {"srp_version": "0.3.0", "body": { … message fields … }}}
+ "params": {"srp_version": "0.4.0", "body": { … message fields … }}}
 ```
 
 Receivers MUST reject frames with an unknown `method`, a different `srp_version`, unknown body fields, non-finite numbers (`NaN`, `Infinity`), or a size above 16 MiB. Binary MessagePack/Protobuf encodings with identical field names are permitted; optional `zstd` compression applies to page blobs only.
@@ -45,7 +45,7 @@ Receivers MUST reject frames with an unknown `method`, a different `srp_version`
   "ram_arena_capacity_mb": 16384,
   "supported_runtimes": ["wasm_cow", "container_tmpfs"],
   "supported_suites": ["srp-env-code", "srp-env-math", "srp-env-web", "srp-env-spatial"],
-  "protocol_version": "0.3.0",
+  "protocol_version": "0.4.0",
   "runtime_profile": "cpython-3.12-siphash13-linux",
   "sandbox_isolation": {"kernel_network_isolation": true, "seccomp": true, "network_namespace": true}
 }
@@ -186,4 +186,4 @@ Nodes on other hosts are served by `NodeServer` and reached through `RemoteNode`
 * **Commands.** `sig` is an Ed25519 signature by the coordinator over `"SRP_CMD_V1|" + canonical_json({node_id, method, params, id, ts, nonce})`. A node only accepts its configured coordinator key (otherwise 401), timestamps within ±60 s (otherwise 401), and single-use nonces (a replay gets 409).
 * **Responses.** Every response, errors included, is signed by the node over `"SRP_RESP_V1|" + id + "|" + canonical_json({result|error})`.
 * **Errors.** Only an allow-listed set of error types crosses the wire.
-* **Deadlines and TLS.** Clients enforce a deadline. TLS or mTLS is enabled by passing an `ssl.SSLContext` to both sides.
+* **Deadlines and TLS.** Clients enforce a deadline. TLS or mTLS is enabled by passing an `ssl.SSLContext` to both sides. The server runs each TLS handshake in its per-connection worker thread under `connection_timeout_s` (default 30 s), so a client that connects and never handshakes cannot stall other requests.

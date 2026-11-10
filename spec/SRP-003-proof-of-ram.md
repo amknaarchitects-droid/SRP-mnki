@@ -1,6 +1,6 @@
 # SRP-003: Proof-of-Honest-RAM (PoHR) & Verification Specification
 
-**Status:** Draft Standard (v0.3.0)  
+**Status:** Draft Standard (v0.4.0)  
 **Category:** Security & Cryptographic Verification  
 **License:** MIT / Public Domain (CC0)
 
@@ -105,18 +105,20 @@ The node passes when the median over `ping_repeats` is at most `max_lookup_us` (
 
 1. **Static policy.** No imports, async, classes, `global`/`nonlocal` or bare `except:`. No `__dunder__` names, definitions, arguments or string constants. No `_private` attributes, and no frame/code/traceback introspection attributes.
 2. **Fuel.** Loops, calls, lambdas, comprehension items and iteration-consuming builtins cost fuel. `**`, `*` and `<<` are guarded against huge integer or sequence results. Fuel equals `timeout_ms × 2000`, and running out raises the uncatchable `FuelExhausted`.
-3. **Process isolation.** Each run is a fresh `python -I -S` with an empty environment, minimal builtins, and inputs passed over stdin. The pinned tests run in their **own namespace** and see only the solution's public, non-builtin names, so a solution cannot shadow `sum`, `len` and the like.
+3. **Process isolation.** Each run is a fresh `python -s -S` (plus `-P` on 3.11+) with a fully controlled environment, minimal builtins, and inputs passed over stdin. `-I` is deliberately not used: it implies `-E`, which would ignore `PYTHONHASHSEED=0` and randomise string hashing per run. The child strips `''`/`.` from `sys.path` before its first import, so modules planted in the working directory are never loaded. The pinned tests run in their **own namespace** and see only the solution's public, non-builtin names, so a solution cannot shadow `sum`, `len` and the like.
 4. **Audit hook (every OS).** Once armed, every CPython audit event is refused except executing the two pre-compiled code objects. That covers imports, `open`, sockets, subprocess/`os.*`, ctypes, `sys._getframe`, and restricted attribute reads such as `gi_frame`, `tb_frame` and `__code__`. The hook still holds if layer 1 is bypassed (tested).
 5. **OS isolation.**
    * **Linux:**
      * a user + network namespace with no interfaces;
      * ASLR disabled;
      * `RLIMIT_AS`, `CPU`, `FSIZE=0`, `NPROC=0`, `NOFILE` and `CORE` limits;
-     * an x86_64 seccomp-BPF filter returning `EPERM` for: network calls, process creation, `exec`, `ptrace`, namespace/mount changes, kernel attack-surface calls, and write-capable `open`/rename/unlink/mkdir/chmod/truncate.
+     * a seccomp-BPF filter for **x86_64 and aarch64** (any other ABI on the same kernel, such as x32 or compat arm32, is killed) returning `EPERM` for: network calls, process creation, `exec`, `ptrace`, namespace/mount changes, kernel attack-surface calls, and write-capable `open`/rename/unlink/mkdir/chmod/truncate.
    * **Windows:** the child starts suspended, joins a kill-on-close Job Object (memory cap, CPU-time cap, single process), then resumes. Network is refused by layer 4 only.
-6. **Hidden grading inputs.** The agent cannot `read_file` the pinned test file or the run log.
+6. **Hidden grading inputs.** The agent cannot `read_file` (or overwrite) the pinned test file, the run log or the property salt.
+7. **Hash-order determinism.** Set iteration order follows element hashes, and for functions, types, exceptions, iterators, NaN (and `None` before 3.12) the hash is a memory address. Every way agent code can build or grow a set (literals, comprehensions, `set()`/`frozenset()`, `add`/`update`/`union`/..., `| & ^ -` and their augmented forms, including on dict views) goes through deterministic set types that raise `TypeError` for such elements. Sets of numbers, strings, bytes, ranges and tuples/frozensets of those behave as usual.
+8. **Property-based grading.** Pinned tests may call `srp_randint(lo, hi)`, `srp_choice(seq)` and `srp_random()` (splitmix64, bit-exact everywhere). The seed is `SHA256(tests ‖ hidden salt ‖ path ‖ submitted code)` (length-prefixed, `.srp_property_salt` in the snapshot), so the agent cannot know the inputs before it submits, every submission gets fresh inputs, and replay audits reproduce them exactly. The helpers exist only in the test namespace.
 
-Nodes advertise `sandbox_isolation` (`isolation_report()`). A coordinator can require kernel-level isolation (`require_kernel_isolation=True`), which today means Linux nodes.
+Nodes advertise `sandbox_isolation` (`isolation_report()`). A coordinator can require kernel-level isolation (`require_kernel_isolation=True`), which today means Linux nodes (x86_64 or aarch64).
 
 ## 4. Verifier Reward Integrity
 
@@ -126,7 +128,7 @@ Nodes advertise `sandbox_isolation` (`isolation_report()`). A coordinator can re
 
 ## 5. Residual Risks (honest limits)
 
-* **Determinism across profiles:** steps cannot be audited across profiles, which is why the coordinator refuses such nodes. On Windows, identity-hash ordering, e.g. iterating a set of functions, can still vary between runs. Confirmation runs make that inconclusive instead of fraud. Deployments that need full auditing should use Linux nodes and auditors.
-* **Static grading:** fixed unit tests can still be over-fitted (special-casing visible behaviour). Use held-out or property-based tests in snapshots.
-* **Sandbox:** the sandbox is not a hypervisor. Windows nodes have no kernel network filter, and CPython memory-safety bugs are out of scope. Permissionless networks should require Linux kernel isolation, or back `container_tmpfs` with gVisor, Firecracker or WASM.
+* **Determinism across profiles:** steps cannot be audited across profiles, which is why the coordinator refuses such nodes. Within a profile, address-dependent set ordering is now refused at runtime (§3.7). Dict order is insertion order and is unaffected. Remaining nondeterminism would need a CPython bug, and confirmation runs still turn it into an inconclusive result rather than fraud.
+* **Grading quality:** seeded property tests (§3.8) defeat special-casing of visible examples, but only if snapshot authors write them. A weak test suite is still a weak reward signal.
+* **Sandbox:** the sandbox is not a hypervisor. Windows nodes have no kernel network filter (an AppContainer launch would need ACL changes on the Python install, so it is left to operators), and CPython memory-safety bugs are out of scope. Permissionless networks should require Linux kernel isolation, or back `container_tmpfs` with gVisor, Firecracker or WASM.
 * **Residency:** the challenge is statistical. It proves possession of node-unique ballast at DRAM-like latency, not that snapshot pages are never swapped.

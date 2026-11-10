@@ -1,6 +1,6 @@
 # SRP-002: Copy-on-Write (CoW) Volatile RAM Arena Specification
 
-**Status:** Draft Standard (v0.3.0)  
+**Status:** Draft Standard (v0.4.0)  
 **Category:** Memory Management & Hardware Protection  
 **License:** MIT / Public Domain (CC0)
 
