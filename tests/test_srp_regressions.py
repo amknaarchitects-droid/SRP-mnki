@@ -255,7 +255,11 @@ def test_deeply_nested_code_is_a_validation_error_not_a_node_crash():
     node.pin_snapshot(M["code"])
     bid = node.fork(M["code"].snapshot_id)[0][0].branch_id
     r = node.step(bid, ActionPayload("apply_patch", {"code": "x = " + "+".join(["1"] * 5000) + "\n"}))
-    assert r.reward == 0.0 and "depth" in r.observation.stderr
+    # Two valid rejections: the AST depth limit, or (where the interpreter's own
+    # parser gives up first, e.g. CPython 3.12 on Windows) a caught RecursionError.
+    stderr = r.observation.stderr
+    assert r.reward == 0.0 and stderr.startswith("Validation Error")
+    assert "depth" in stderr or "deeply nested" in stderr
     assert node.arena.get_branch(bid).read_file("solution.py") == M["code"].initial_files["solution.py"]
 
 
