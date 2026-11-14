@@ -14,6 +14,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from srp.protocol.crypto import NodeKeypair, verify_signature
 
+# Single source of truth for the wire/protocol version (wire, coordinator, nodes).
+PROTOCOL_VERSION = "0.5.0"
+
+_MACHINE_ALIASES = {"amd64": "x86_64", "x64": "x86_64", "arm64": "aarch64"}
+
 
 def sha256_hex(data: bytes | str) -> str:
     if isinstance(data, str):
@@ -23,21 +28,26 @@ def sha256_hex(data: bytes | str) -> str:
 
 def canonical_json(obj: Any) -> str:
     """Deterministic JSON used for every signed/hashed structure (rejects NaN/inf)."""
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), allow_nan=False, default=str)
+    # No `default=`: a non-JSON value must fail loudly, never hash via a
+    # str() that may embed an address or differ between machines.
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def current_runtime_profile() -> str:
     """
     Identifies everything that can change verifier output for identical inputs:
     interpreter implementation + minor version (exception texts, recursion limits),
-    the str-hash algorithm (set iteration order) and the OS (allocator/ASLR
-    behaviour, resource-limit semantics). Nodes and the auditor that replays
-    them must share a profile.
+    the str-hash algorithm (set iteration order), the OS (allocator/ASLR
+    behaviour, resource-limit semantics) and the CPU architecture (libm and
+    float formatting). Nodes and the auditor that replays them must share a
+    profile.
     """
+    machine = platform.machine().lower()
+    machine = _MACHINE_ALIASES.get(machine, machine) or "unknown"
     return (
         f"{platform.python_implementation().lower()}-"
         f"{sys.version_info.major}.{sys.version_info.minor}-"
-        f"{sys.hash_info.algorithm}-{sys.platform}"
+        f"{sys.hash_info.algorithm}-{sys.platform}-{machine}"
     )
 
 
@@ -98,7 +108,7 @@ class NodeCapabilities:
         ]
     )
     public_key_hex: str = ""  # Ed25519 public key (32 bytes, hex)
-    protocol_version: str = "0.4.0"
+    protocol_version: str = PROTOCOL_VERSION
     runtime_profile: str = field(default_factory=current_runtime_profile)
     sandbox_isolation: Dict[str, Any] = field(default_factory=dict)
 
@@ -143,6 +153,18 @@ class SnapshotManifest:
     def content_merkle_root(self) -> str:
         _, _, state_hash = self.canonical_pages()
         return state_hash
+
+    @property
+    def identity_digest(self) -> str:
+        """
+        Everything that determines how steps on this snapshot behave: its id,
+        file contents, verifier suite and runtime. Two manifests with the same
+        files but a different suite are different environments.
+        """
+        return sha256_hex(canonical_json({
+            "v": "SRP_MANIFEST_ID_V1", "snapshot_id": self.snapshot_id, "suite": self.suite,
+            "runtime": self.runtime, "content": self.content_merkle_root,
+        }))
 
 
 @dataclass
@@ -326,6 +348,7 @@ class FraudProof:
     lineage: List[Dict[str, Any]] = field(default_factory=list)
     runtime_profile: str = ""
     trusted_observation_hash: str = ""
+    root_manifest_digest: str = ""  # SnapshotManifest.identity_digest (v0.5.0+)
 
     def is_third_party_verifiable(self) -> bool:
         if self.receipt is None or not self.node_public_key_hex:
@@ -334,9 +357,24 @@ class FraudProof:
             return False
         if not self.receipt.verify_signature(self.node_public_key_hex):
             return False
-        if self.kind in SLASHABLE_FRAUD_KINDS:
-            return bool(self.root_snapshot_id and self.root_content_hash and self.lineage)
-        return False
+        if self.kind not in SLASHABLE_FRAUD_KINDS:
+            return False
+        if not (self.root_snapshot_id and self.root_content_hash and self.lineage):
+            return False
+        # The signed receipt must be for the final step of the recorded lineage:
+        # same root snapshot, same action and same timeout. (That it also starts
+        # from the lineage's pre-state is checked by replay.)
+        last = self.lineage[-1]
+        try:
+            last_hash = ActionPayload(last["command"], last["payload"]).action_hash
+            last_timeout = int(last["timeout_ms"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        return (
+            self.receipt.root_snapshot_id == self.root_snapshot_id
+            and self.receipt.action_hash == last_hash
+            and int(self.receipt.timeout_ms) == last_timeout
+        )
 
     @property
     def slashable(self) -> bool:

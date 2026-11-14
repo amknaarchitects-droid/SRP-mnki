@@ -34,6 +34,15 @@ def _is_num(v: Any) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v))
 
 
+def _icbrt(n: int) -> int:
+    """Largest k with k**3 <= n, in exact integer arithmetic (a float cube root can
+    land just below an integer on one platform and just above it on another)."""
+    k = 0
+    while (k + 1) ** 3 <= n:
+        k += 1
+    return k
+
+
 def _bounds(p: Prim) -> Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]:
     cx, cy, cz = (float(c) for c in p.get("center", [0.0, 0.0, 0.0]))
     t = p.get("type", "box")
@@ -57,9 +66,11 @@ def _contains(p: Prim, x: float, y: float, z: float) -> bool:
         return abs(x - cx) <= dx / 2 and abs(y - cy) <= dy / 2 and abs(z - cz) <= dz / 2
     if t == "cylinder":
         r, h = float(p.get("radius", 1.0)), float(p.get("height", 1.0))
-        return (x - cx) ** 2 + (y - cy) ** 2 <= r * r and abs(z - cz) <= h / 2
+        dx, dy = x - cx, y - cy  # plain products: float `**` goes through libm pow
+        return dx * dx + dy * dy <= r * r and abs(z - cz) <= h / 2
     r = float(p.get("radius", 1.0))
-    return (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2 <= r * r
+    dx, dy, dz = x - cx, y - cy, z - cz
+    return dx * dx + dy * dy + dz * dz <= r * r
 
 
 def compute_csg_metrics(primitives: List[Prim]) -> Dict[str, Any]:
@@ -104,7 +115,7 @@ def compute_csg_metrics(primitives: List[Prim]) -> Dict[str, Any]:
     curved_cells = sum(1 for *_, cand in occupied_cells if any(curved[c] for c in cand))
     sub = 1
     if curved_cells:
-        sub = max(2, min(40, int((CURVED_SAMPLE_BUDGET / curved_cells) ** (1.0 / 3.0))))
+        sub = max(2, min(40, _icbrt(CURVED_SAMPLE_BUDGET // curved_cells)))
 
     vol = 0.0
     moment = [0.0, 0.0, 0.0]

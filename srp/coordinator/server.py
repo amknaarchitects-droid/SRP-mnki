@@ -33,6 +33,7 @@ from __future__ import annotations
 import collections
 import hashlib
 import hmac
+import inspect
 import json
 import math
 import os
@@ -44,7 +45,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
-from srp.node.daemon import DEFAULT_STEP_TIMEOUT_MS, SRPProviderNode
+from srp.node.daemon import DEFAULT_STEP_TIMEOUT_MS, MAX_STEP_TIMEOUT_MS, SRPProviderNode
 from srp.node.ram_arena import PAGE_SIZE
 from srp.protocol.crypto import NodeKeypair, registration_message, verify_signature
 from srp.protocol.messages import (
@@ -53,6 +54,7 @@ from srp.protocol.messages import (
     ActionPayload,
     ExecutionReceipt,
     FraudProof,
+    PROTOCOL_VERSION,
     MemoryPingChallenge,
     SnapshotManifest,
     StepResult,
@@ -62,7 +64,6 @@ from srp.protocol.messages import (
 from srp.protocol.residency import BallastCheckpoints, verify_chain
 from srp.settlement.base import FiatAndApiCreditLedger, SettlementProvider
 
-PROTOCOL_VERSION = "0.4.0"
 
 
 # --------------------------------------------------------------------------- #
@@ -87,10 +88,17 @@ def _cell_digest(parent_digest: str, action_json: str, timeout_ms: int) -> str:
 
 
 def _freeze_action(action: ActionPayload) -> str:
-    return json.dumps(
-        {"command": action.command, "payload": action.payload},
-        sort_keys=True, separators=(",", ":"), allow_nan=False,
-    )
+    """Canonical action JSON; raises ValueError (before any node call) for actions
+    that are not JSON or not valid Unicode (e.g. lone surrogates)."""
+    try:
+        text = json.dumps(
+            {"command": action.command, "payload": action.payload},
+            sort_keys=True, separators=(",", ":"), allow_nan=False,
+        )
+        json.dumps(json.loads(text), ensure_ascii=False).encode("utf-8")
+    except (TypeError, ValueError) as exc:  # UnicodeEncodeError is a ValueError
+        raise ValueError(f"Action is not valid canonical JSON text: {exc}") from exc
+    return text
 
 
 def _thaw(action_json: str) -> ActionPayload:
@@ -105,6 +113,12 @@ def _cells(lineage: Optional[_Cell]) -> List[_Cell]:
         lineage = lineage.parent
     out.reverse()
     return out
+
+
+def _check_timeout(timeout_ms: Any, name: str = "timeout_ms") -> None:
+    """Reject timeouts the node would clamp; a clamped value breaks the receipt check."""
+    if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, int) or not 1 <= timeout_ms <= MAX_STEP_TIMEOUT_MS:
+        raise ValueError(f"{name} must be an integer within [1, {MAX_STEP_TIMEOUT_MS}]")
 
 
 def _timed_out(result: StepResult) -> bool:
@@ -132,6 +146,8 @@ class _Auditor:
         self._lock = threading.Lock()
         self._cache: "collections.OrderedDict[str, str]" = collections.OrderedDict()
         self._cache_root: Dict[str, str] = {}
+        self._pinned: Set[str] = set()
+        # Only the public node API is used, so a RemoteNode can be an auditor.
 
     def _ensure_pinned(self, manifest: SnapshotManifest) -> None:
         try:
@@ -139,6 +155,8 @@ class _Auditor:
         except MemoryError:
             self.drop_all()
             self.node.pin_snapshot(manifest)
+        with self._lock:
+            self._pinned.add(manifest.snapshot_id)
 
     def drop_root(self, root: str) -> None:
         with self._lock:
@@ -146,27 +164,35 @@ class _Auditor:
             bids = [self._cache.pop(d) for d in stale if d in self._cache]
             for d in stale:
                 self._cache_root.pop(d, None)
+            self._pinned.discard(root)
         for bid in bids:
-            self.node.evict_branch(bid)
+            self._evict_quietly(bid)
         try:
             self.node.evict_snapshot(root, evict_branches=True)
         except Exception:
             pass
 
     def drop_all(self) -> None:
+        """Free everything this auditor holds (cached branches and pinned snapshots)."""
         with self._lock:
             bids = list(self._cache.values())
-            roots = set(self._cache_root.values())
+            snaps = list(self._pinned)
             self._cache.clear()
             self._cache_root.clear()
+            self._pinned.clear()
         for bid in bids:
+            self._evict_quietly(bid)
+        for snap in snaps:
+            try:
+                self.node.evict_snapshot(snap, evict_branches=True)
+            except Exception:
+                pass
+
+    def _evict_quietly(self, bid: str) -> None:
+        try:
             self.node.evict_branch(bid)
-        for snap in list(self.node.arena._snapshots):
-            if snap not in roots:
-                try:
-                    self.node.evict_snapshot(snap)
-                except Exception:
-                    pass
+        except Exception:
+            pass
 
     def _remember(self, digest: str, root: str, bid: str) -> None:
         evict: List[str] = []
@@ -181,7 +207,7 @@ class _Auditor:
                     self._cache_root.pop(old_digest, None)
                     evict.append(old_bid)
         for b in evict:
-            self.node.evict_branch(b)
+            self._evict_quietly(b)
 
     def run(
         self,
@@ -197,21 +223,27 @@ class _Auditor:
         """
         root = manifest.snapshot_id
         self._ensure_pinned(manifest)
+        with self._lock:  # newest checkpoint first; node calls happen outside the lock
+            candidates = [
+                (i, history[i].digest, self._cache[history[i].digest])
+                for i in range(len(history) - 1, -1, -1) if history[i].digest in self._cache
+            ]
         start, base_bid = 0, None
-        with self._lock:
-            for i in range(len(history) - 1, -1, -1):
-                bid = self._cache.get(history[i].digest)
-                if bid is not None and self.node.has_branch(bid):
-                    self._cache.move_to_end(history[i].digest)
-                    start, base_bid = i + 1, bid
-                    break
+        for i, digest, cached in candidates:
+            if self.node.has_branch(cached):
+                with self._lock:
+                    if digest in self._cache:
+                        self._cache.move_to_end(digest)
+                start, base_bid = i + 1, cached
+                break
         source = base_bid or root
         try:
-            bid = self.node.fork(source, count=1)[0][0].branch_id
+            forked = self.node.fork(source, count=1)[0][0]
         except (KeyError, MemoryError):
             self.drop_all()
             self._ensure_pinned(manifest)
-            start, bid = 0, self.node.fork(root, count=1)[0][0].branch_id
+            start, forked = 0, self.node.fork(root, count=1)[0][0]
+        bid, before = forked.branch_id, forked.state_hash
         keep = False
         try:
             for cell in history[start:]:
@@ -220,7 +252,7 @@ class _Auditor:
                     return {"status": "indeterminate"}
                 if _outcome(truth.receipt)[1:] != _outcome(cell.receipt)[1:]:
                     return {"status": "prefix_mismatch", "cell": cell, "truth": truth}
-            before = self.node.arena.get_branch(bid).state_hash
+                before = truth.receipt.next_state_hash
             t0 = time.perf_counter()
             truth = self.node.step(bid, action, timeout_ms=timeout_ms)
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
@@ -230,7 +262,7 @@ class _Auditor:
             return {"status": "ok", "before": before, "truth": truth, "elapsed_ms": elapsed_ms}
         finally:
             if not keep:
-                self.node.evict_branch(bid)
+                self._evict_quietly(bid)
 
 
 def verify_fraud_proof_by_replay(
@@ -246,6 +278,8 @@ def verify_fraud_proof_by_replay(
         return False
     if manifest.snapshot_id != fp.root_snapshot_id or manifest.content_merkle_root != fp.root_content_hash:
         return False
+    if fp.root_manifest_digest and manifest.identity_digest != fp.root_manifest_digest:
+        return False  # same files, different suite/runtime: not the environment the node ran
     if fp.runtime_profile and fp.runtime_profile != current_runtime_profile():
         raise RuntimeError(f"Replay requires runtime profile {fp.runtime_profile}")
     steps = fp.lineage
@@ -258,6 +292,11 @@ def verify_fraud_proof_by_replay(
             truth = node.step(bid, ActionPayload(step["command"], step["payload"]),
                               timeout_ms=int(step["timeout_ms"]))
         if truth is None or _timed_out(truth):
+            return False
+        # The signed receipt must describe the final step of *this* lineage: the
+        # state it started from has to be the replayed pre-state. Otherwise the
+        # proof pairs an honest receipt with someone else's history.
+        if truth.receipt.parent_state_hash != fp.receipt.parent_state_hash:
             return False
         if _outcome(truth.receipt)[1:] == _outcome(fp.receipt)[1:]:
             return False
@@ -307,6 +346,7 @@ class SRPCoordinator:
         timeout_strike_limit: int = 3,
         max_billable_dirty_pages: int = 256,
         step_timeout_ms: int = DEFAULT_STEP_TIMEOUT_MS,
+        max_concurrent_canaries: int = 2,
         require_kernel_isolation: bool = False,
         auditor_node: Optional[SRPProviderNode] = None,
         auditor_ram_mb: int = 512,
@@ -317,6 +357,7 @@ class SRPCoordinator:
         for name, rate in (("canary_rate", canary_rate), ("audit_rate", audit_rate)):
             if rate is not None and not 0.0 <= rate <= 1.0:
                 raise ValueError(f"{name} must be within [0, 1]")
+        _check_timeout(step_timeout_ms, "step_timeout_ms")
         self._lock = threading.RLock()
         self.settlement: SettlementProvider = settlement_provider or FiatAndApiCreditLedger()
         self.canary_rate = canary_rate
@@ -335,6 +376,8 @@ class SRPCoordinator:
         self.timeout_strike_limit = max(1, int(timeout_strike_limit))
         self.max_billable_dirty_pages = max(0, int(max_billable_dirty_pages))
         self.step_timeout_ms = step_timeout_ms
+        self.max_concurrent_canaries = max(0, int(max_concurrent_canaries))
+        self._canaries_in_flight = 0
         self.require_kernel_isolation = require_kernel_isolation
         self.state_path = state_path
         self._rng = secrets.SystemRandom()
@@ -347,6 +390,7 @@ class SRPCoordinator:
         self._timeout_strikes: Dict[str, int] = {}
         self.fraud_proofs: List[FraudProof] = []
         self._slash_amounts: Dict[int, float] = {}
+        self._slash_receipts: Dict[int, str] = {}
 
         loaded = self._load_state() if state_path else {}
         secret_hex = loaded.get("master_secret_hex")
@@ -378,6 +422,9 @@ class SRPCoordinator:
         self.audits_performed = 0
         self.audits_inconclusive = 0
         self.canaries_run = 0
+        self.canaries_inconclusive = 0
+        self.audit_errors = 0
+        self.last_audit_error = ""
         if state_path:
             self.save_state()
 
@@ -398,6 +445,7 @@ class SRPCoordinator:
             fp.receipt = ExecutionReceipt(**rec) if rec else None
             self.fraud_proofs.append(fp)
         self._slash_amounts = {int(k): v for k, v in data.get("slash_amounts", {}).items()}
+        self._slash_receipts = {int(k): v for k, v in data.get("slash_receipts", {}).items()}
         return data
 
     def save_state(self) -> None:
@@ -414,12 +462,20 @@ class SRPCoordinator:
                 "timeout_strikes": dict(self._timeout_strikes),
                 "fraud_proofs": [asdict(fp) for fp in self.fraud_proofs],
                 "slash_amounts": {str(k): v for k, v in self._slash_amounts.items()},
+                "slash_receipts": {str(k): v for k, v in self._slash_receipts.items()},
                 # Secrets: protect this file (or supply master_secret / keypair from a KMS)
                 "master_secret_hex": self._master.hex(),
                 "coordinator_seed_hex": self.keypair._seed.hex(),
             }
         tmp = f"{self.state_path}.tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
+        # The file holds the master secret and the coordinator signing seed:
+        # owner-only from the moment it exists (POSIX; Windows ignores the mode).
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.chmod(tmp, 0o600)  # in case a stale .tmp already existed
+        except OSError:
+            pass
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(data, fh, sort_keys=True)
         os.replace(tmp, self.state_path)
 
@@ -518,10 +574,18 @@ class SRPCoordinator:
     ) -> List[str]:
         """Pin a base snapshot plus node-unique sequential ballast on selected (or all routable) nodes."""
         expected_root = manifest.content_merkle_root
-        with self._lock:
+        identity = manifest.identity_digest
+
+        def check_identity() -> None:
             existing = self._manifests.get(manifest.snapshot_id)
-            if existing is not None and existing.content_merkle_root != expected_root:
-                raise ValueError(f"Snapshot id '{manifest.snapshot_id}' already registered with different content")
+            if existing is not None and existing.identity_digest != identity:
+                raise ValueError(
+                    f"Snapshot id '{manifest.snapshot_id}' already registered with different "
+                    "content, suite or runtime"
+                )
+
+        with self._lock:
+            check_identity()
             if target_node_ids is None:
                 node_ids = [nid for nid in self._nodes if self._routable(nid)]
             else:
@@ -533,32 +597,41 @@ class SRPCoordinator:
                     raise KeyError(f"Unknown target node '{nid}'")
                 if not self._routable(nid):
                     raise PermissionError(f"Node '{nid}' is quarantined or under-staked")
-                caps = self._nodes[nid].capabilities()
-                if manifest.suite not in caps.supported_suites:
-                    raise ValueError(f"Node '{nid}' does not support verifier suite '{manifest.suite}'")
-                if manifest.runtime not in caps.supported_runtimes:
-                    raise ValueError(f"Node '{nid}' does not support runtime '{manifest.runtime}'")
-            self._manifests[manifest.snapshot_id] = manifest
             nodes = {nid: self._nodes[nid] for nid in node_ids}
+
+        for nid, node in nodes.items():  # node calls outside the coordinator lock
+            caps = node.capabilities()
+            if manifest.suite not in caps.supported_suites:
+                raise ValueError(f"Node '{nid}' does not support verifier suite '{manifest.suite}'")
+            if manifest.runtime not in caps.supported_runtimes:
+                raise ValueError(f"Node '{nid}' does not support runtime '{manifest.runtime}'")
+
+        with self._lock:
+            check_identity()
+            self._manifests[manifest.snapshot_id] = manifest
             specs = {nid: self._ballast_spec(nid, manifest) for nid in node_ids}
 
         pinned: List[str] = []
-        for nid, node in nodes.items():  # node calls outside the coordinator lock
-            snap = node.pin_snapshot(manifest)
-            if snap.state_hash != expected_root:
-                raise ValueError(f"Node '{nid}' pinned snapshot with a wrong state hash")
-            spec = specs[nid]
-            if node.ballast_page_count(manifest.snapshot_id) != spec.count:
-                node.pin_ballast_seed(manifest.snapshot_id, spec.seed.hex(), spec.count)
-            pinned.append(nid)
-
-        with self._lock:
-            holders = self._snapshot_holders.setdefault(manifest.snapshot_id, [])
-            for nid in pinned:
-                self._lease_clock.setdefault((nid, manifest.snapshot_id), time.time())
-                if nid not in holders:
-                    holders.append(nid)
-            return list(holders)
+        try:
+            for nid, node in nodes.items():
+                snap = node.pin_snapshot(manifest)
+                if snap.state_hash != expected_root:
+                    raise ValueError(f"Node '{nid}' pinned snapshot with a wrong state hash")
+                spec = specs[nid]
+                if node.ballast_page_count(manifest.snapshot_id) != spec.count:
+                    node.pin_ballast_seed(manifest.snapshot_id, spec.seed.hex(), spec.count)
+                pinned.append(nid)
+        finally:
+            # Record every node that did pin, even if a later node failed, so the
+            # snapshot can still be routed to and evicted from them.
+            with self._lock:
+                holders = self._snapshot_holders.setdefault(manifest.snapshot_id, [])
+                for nid in pinned:
+                    self._lease_clock.setdefault((nid, manifest.snapshot_id), time.time())
+                    if nid not in holders:
+                        holders.append(nid)
+                result = list(holders)
+        return result
 
     def evict_snapshot(self, snapshot_id: str, evict_branches: bool = True) -> int:
         """SRP_EVICT: drop a snapshot from every holder; a refusal keeps that holder routable."""
@@ -578,7 +651,11 @@ class SRPCoordinator:
             for nid in done:
                 self._ballast.pop((nid, snapshot_id), None)
                 self._lease_clock.pop((nid, snapshot_id), None)
-            self._drop_stale_branches_locked()
+            # Branches of this root on nodes that evicted it are gone with it.
+            gone = [bid for bid, nid in self._branch_to_node.items()
+                    if nid in done and self._branch_root.get(bid) == snapshot_id]
+            for bid in gone:
+                self._forget_branch_locked(bid)
             if remaining:
                 self._snapshot_holders[snapshot_id] = remaining
             else:
@@ -775,8 +852,10 @@ class SRPCoordinator:
 
     def _dispatch(
         self, branch_id: str, action: ActionPayload, timeout_ms: Optional[int], allow_audit: bool,
-        force_audit: bool = False,
+        force_audit: bool = False, schedule_canary: bool = True,
     ) -> StepResult:
+        timeout = self.step_timeout_ms if timeout_ms is None else timeout_ms
+        _check_timeout(timeout)
         with self._lock:
             if branch_id not in self._branch_to_node:
                 raise KeyError(f"Unknown branch_id '{branch_id}'")
@@ -794,9 +873,8 @@ class SRPCoordinator:
             lineage = self._branch_lineage.get(branch_id)
             manifest = self._manifests.get(root)
 
-        frozen = _freeze_action(action)
+        frozen = _freeze_action(action)  # ValueError here leaves the branch untouched
         action = _thaw(frozen)
-        timeout = int(timeout_ms or self.step_timeout_ms)
         request_id = f"req_{uuid.uuid4().hex}"
         try:
             result = node.step(branch_id=branch_id, action=action, request_id=request_id, timeout_ms=timeout)
@@ -829,11 +907,14 @@ class SRPCoordinator:
         ):
             try:
                 verdict = self._audit(profile, manifest, lineage, action, timeout, digest, result)
-            except Exception:
-                # The coordinator's own failure must never desync or frame the node.
+            except Exception as exc:
+                # The coordinator's own failure must never desync or frame the node,
+                # but it must be visible: a broken auditor means no fraud is caught.
                 verdict = {"status": "inconclusive"}
                 with self._lock:
                     self.audits_inconclusive += 1
+                    self.audit_errors += 1
+                    self.last_audit_error = f"{type(exc).__name__}: {exc}"[:500]
 
         if verdict["status"] == "fraud":
             self._abandon_branch(node, branch_id)
@@ -846,6 +927,8 @@ class SRPCoordinator:
                 self._timeout_strikes[nid] = strikes
             if strikes >= self.timeout_strike_limit:
                 self._record_fault(nid, f"{strikes} contradicted wall-clock timeout claims", result)
+            else:
+                self.save_state()  # strikes must survive a restart
 
         cell = _Cell(frozen, timeout, rec, lineage, digest, (lineage.depth + 1) if lineage else 1)
         with self._lock:
@@ -863,7 +946,8 @@ class SRPCoordinator:
                 compute_ms=result.metrics.exec_time_ms,
                 dirty_pages=min(rec.step_dirty_pages, self.max_billable_dirty_pages),
             )
-        self._maybe_schedule_canary(nid)
+        if schedule_canary:  # canary steps never spawn further canaries
+            self._maybe_schedule_canary(nid)
         return result
 
     @staticmethod
@@ -918,17 +1002,7 @@ class SRPCoordinator:
             return {"status": "inconclusive"}
 
         if out["status"] == "prefix_mismatch":
-            bad: _Cell = out["cell"]
-            if not self._confirmed(auditor, manifest, _cells(bad.parent), _thaw(bad.action_json),
-                                   bad.timeout_ms, bad.receipt):
-                with self._lock:
-                    self.audits_inconclusive += 1
-                return {"status": "inconclusive"}
-            return {
-                "status": "fraud", "kind": FRAUD_KIND_REPLAY, "receipt": bad.receipt,
-                "reason": f"Replay audit: committed step {bad.depth} diverges from trusted replay",
-                "lineage": _cells(bad), "truth": out["truth"],
-            }
+            return self._prefix_verdict(auditor, manifest, out)
 
         truth: StepResult = out["truth"]
         if _timed_out(result) or _timed_out(truth):
@@ -949,6 +1023,20 @@ class SRPCoordinator:
             "status": "fraud", "kind": FRAUD_KIND_REPLAY, "receipt": rec,
             "reason": "Replay audit: result differs from trusted replay",
             "lineage": _cells(here), "truth": truth,
+        }
+
+    def _prefix_verdict(self, auditor, manifest, out: Dict[str, Any]) -> Dict[str, Any]:
+        """Verdict for an auditor run whose replay of committed history diverged."""
+        bad: _Cell = out["cell"]
+        if not self._confirmed(auditor, manifest, _cells(bad.parent), _thaw(bad.action_json),
+                               bad.timeout_ms, bad.receipt):
+            with self._lock:
+                self.audits_inconclusive += 1
+            return {"status": "inconclusive"}
+        return {
+            "status": "fraud", "kind": FRAUD_KIND_REPLAY, "receipt": bad.receipt,
+            "reason": f"Replay audit: committed step {bad.depth} diverges from trusted replay",
+            "lineage": _cells(bad), "truth": out["truth"],
         }
 
     def _confirmed(self, auditor, manifest, history, action, timeout, claimed: ExecutionReceipt) -> bool:
@@ -975,13 +1063,24 @@ class SRPCoordinator:
     def _maybe_schedule_canary(self, node_id: str) -> None:
         if not self._canaries or self.canary_rate <= 0 or self._rng.random() >= self.canary_rate:
             return
-        threading.Thread(target=self._safe_canary, args=(node_id,), daemon=True).start()
+        with self._lock:
+            if self._canaries_in_flight >= self.max_concurrent_canaries:
+                return
+            self._canaries_in_flight += 1
+        try:
+            threading.Thread(target=self._safe_canary, args=(node_id,), daemon=True).start()
+        except Exception:
+            with self._lock:
+                self._canaries_in_flight -= 1
 
     def _safe_canary(self, node_id: str) -> None:
         try:
             self.run_canary_round([node_id])
         except Exception:
             pass
+        finally:
+            with self._lock:
+                self._canaries_in_flight -= 1
 
     def run_canary_round(self, node_ids: Optional[List[str]] = None) -> List[Tuple[str, bool]]:
         """Send one random canary to each (routable) node, in random order, at a random depth."""
@@ -1002,8 +1101,11 @@ class SRPCoordinator:
             if pool and self._rng.random() < 0.75:
                 full = _cells(self._rng.choice(pool))
                 prefix = full[: self._rng.randint(0, len(full))]
+            # Registered expectations describe the canary at the root snapshot; at
+            # any other depth the ground truth must come from a trusted replay.
+            exp_reward, exp_state = (task.expected_reward, task.expected_state_hash) if not prefix else (None, None)
             ok, _ = self.inject_canary_audit(
-                nid, task.snapshot_id, task.action, task.expected_reward, task.expected_state_hash,
+                nid, task.snapshot_id, task.action, exp_reward, exp_state,
                 prefix=[(_thaw(c.action_json), c.timeout_ms) for c in prefix],
             )
             results.append((nid, ok))
@@ -1043,22 +1145,36 @@ class SRPCoordinator:
             with lock:
                 try:
                     for act, t in prefix:
-                        self._dispatch(bid, act, t, allow_audit=True)
-                    res = self._dispatch(bid, canary_action, None, allow_audit=True)
+                        r = self._dispatch(bid, act, t, allow_audit=True, schedule_canary=False)
+                        if _timed_out(r):  # branch is now closed: nothing to compare
+                            return self._canary_inconclusive()
+                    res = self._dispatch(bid, canary_action, None, allow_audit=True, schedule_canary=False)
                 except PermissionError:
                     with self._lock:
                         fp = next((p for p in reversed(self.fraud_proofs) if p.node_id == node_id), None)
                     return False, fp
                 with self._lock:
                     lineage = self._branch_lineage.get(bid)
+            if _timed_out(res):
+                # A wall-clock backstop hit is indeterminate (load, not lies); the
+                # audit path above already handles contradicted timeout claims.
+                return self._canary_inconclusive()
             if expected_reward is None or expected_state_hash is None:
                 auditor = self._auditors.get(profile)
                 if auditor is None:
-                    return True, None
+                    return self._canary_inconclusive()
                 out = auditor.run(manifest, _cells(lineage.parent if lineage else None), canary_action,
                                   self.step_timeout_ms, None)
+                if out["status"] == "prefix_mismatch":
+                    # A committed prefix step was a lie: that receipt is the fraud.
+                    verdict = self._prefix_verdict(auditor, manifest, out)
+                    if verdict["status"] != "fraud":
+                        return self._canary_inconclusive()
+                    fp = self._record_fraud(node_id, verdict["reason"], verdict["receipt"], verdict["kind"],
+                                            manifest, verdict["lineage"], profile, verdict["truth"])
+                    return False, fp
                 if out["status"] != "ok" or _timed_out(out["truth"]):
-                    return True, None
+                    return self._canary_inconclusive()
                 expected_reward = out["truth"].reward if expected_reward is None else expected_reward
                 expected_state_hash = (
                     out["truth"].receipt.next_state_hash if expected_state_hash is None else expected_state_hash
@@ -1077,6 +1193,11 @@ class SRPCoordinator:
             return True, None
         finally:
             self.evict_branch(bid)
+
+    def _canary_inconclusive(self) -> Tuple[bool, Optional[FraudProof]]:
+        with self._lock:
+            self.canaries_inconclusive += 1
+        return True, None
 
     # ================================================================ fraud
     def _record_fault(self, node_id: str, reason: str, result: Optional[StepResult] = None) -> FraudProof:
@@ -1118,7 +1239,7 @@ class SRPCoordinator:
             actual_state_hash=receipt.next_state_hash, timestamp=time.time(), receipt=receipt,
             node_public_key_hex=pubkey, kind=kind, root_snapshot_id=manifest.snapshot_id,
             root_content_hash=manifest.content_merkle_root, lineage=lineage,
-            runtime_profile=profile,
+            runtime_profile=profile, root_manifest_digest=manifest.identity_digest,
             trusted_observation_hash=(truth.receipt.observation_hash if truth else ""),
         )
         with self._lock:
@@ -1128,6 +1249,8 @@ class SRPCoordinator:
             rec = self.settlement.record_canary_failure(node_id, fp)
             with self._lock:
                 self._slash_amounts[index] = -float(getattr(rec, "delta_units", 0.0))
+                if getattr(rec, "receipt_id", None):
+                    self._slash_receipts[index] = rec.receipt_id
         if self.quarantine_on_fraud:
             self._quarantine(node_id)
         else:
@@ -1148,15 +1271,27 @@ class SRPCoordinator:
         if verify_fraud_proof_by_replay(fp, manifest, runs=self.audit_confirm_runs + 1):
             return False
         amount = self._slash_amounts.pop(proof_index, 0.0)
+        receipt_id = self._slash_receipts.pop(proof_index, None)
         refund = getattr(self.settlement, "reverse_slash", None)
         if amount and refund:
-            refund(fp.node_id, amount, f"appeal of proof #{proof_index}")
+            if receipt_id and "slash_receipt_id" in inspect.signature(refund).parameters:
+                refund(fp.node_id, amount, f"appeal of proof #{proof_index}", slash_receipt_id=receipt_id)
+            else:
+                refund(fp.node_id, amount, f"appeal of proof #{proof_index}")
         with self._lock:
-            self._quarantined.discard(fp.node_id)
-            if fp.node_public_key_hex:
-                self._quarantined_keys.discard(fp.node_public_key_hex)
             fp.reason = f"[OVERTURNED ON APPEAL] {fp.reason}"
             fp.kind = "overturned"
+            # Reinstate only if nothing else against this node id or key still stands.
+            key = fp.node_public_key_hex
+            standing = [
+                p for p in self.fraud_proofs
+                if p.kind != "overturned"
+                and (p.node_id == fp.node_id or (key and p.node_public_key_hex == key))
+            ]
+            if not standing:
+                self._quarantined.discard(fp.node_id)
+                if key:
+                    self._quarantined_keys.discard(key)
         self.save_state()
         return True
 
@@ -1177,12 +1312,6 @@ class SRPCoordinator:
         self._closed_branches.discard(branch_id)
         return nid
 
-    def _drop_stale_branches_locked(self) -> None:
-        stale = [bid for bid, nid in self._branch_to_node.items()
-                 if nid in self._nodes and not self._nodes[nid].has_branch(bid)]
-        for bid in stale:
-            self._forget_branch_locked(bid)
-
     def evict_branch(self, branch_id: str) -> int:
         with self._lock:
             nid = self._forget_branch_locked(branch_id)
@@ -1194,10 +1323,18 @@ class SRPCoordinator:
     def reap_expired_branches(self) -> int:
         """Enforce SRP_FORK `ttl_seconds` across nodes; returns branches reaped."""
         with self._lock:
-            nodes = list(self._nodes.values())
-        reaped = sum(len(n.reap_expired()) for n in nodes)
-        with self._lock:
-            self._drop_stale_branches_locked()
+            nodes = dict(self._nodes)
+        reaped = 0
+        for nid, node in nodes.items():  # outside the lock; one failing node does not stop the rest
+            try:
+                evicted = node.reap_expired()
+            except Exception:
+                continue
+            reaped += len(evicted)
+            with self._lock:
+                for bid in evicted:
+                    if self._branch_to_node.get(bid) == nid:
+                        self._forget_branch_locked(bid)
         return reaped
 
     def cluster_telemetry(self) -> Dict[str, object]:
@@ -1220,7 +1357,10 @@ class SRPCoordinator:
             "memory_pings_verified": self.memory_pings_verified,
             "replay_audits_performed": self.audits_performed,
             "replay_audits_inconclusive": self.audits_inconclusive,
+            "replay_audit_errors": self.audit_errors,
+            "last_audit_error": self.last_audit_error,
             "canaries_run": self.canaries_run,
+            "canaries_inconclusive": self.canaries_inconclusive,
             "fraud_proofs_triggered": len([f for f in fraud if f.slashable]),
             "protocol_faults": len([f for f in fraud if f.kind == "protocol_fault"]),
             "nodes": node_stats,

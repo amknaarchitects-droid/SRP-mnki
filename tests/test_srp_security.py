@@ -372,7 +372,10 @@ def test_wrongly_framed_node_wins_its_appeal_and_is_refunded():
     slashed_stake = ledger.stake_of("n1")
     assert ok is False and coord.is_quarantined("n1") and slashed_stake < 20.01
     assert coord.appeal_fraud(coord.fraud_proofs.index(fp)) is True
-    assert not coord.is_quarantined("n1") and abs(ledger.stake_of("n1") - (slashed_stake + 10.0)) < 1e-9
+    # Each part of the slash goes back where it came from (stake and unsettled balance)
+    acct = ledger.get_account("n1")
+    assert not coord.is_quarantined("n1") and abs(ledger.stake_of("n1") - 30.0) < 1e-9
+    assert acct.slashed_units == 0.0 and acct.balance_units > 0
     assert coord.fraud_proofs[-1].kind == "overturned"
 
 
@@ -577,7 +580,7 @@ def test_wire_codec_roundtrip_preserves_signed_receipts():
     ],
 )
 def test_wire_codec_rejects_malformed_frames(body):
-    frame = '{"jsonrpc":"2.0","id":"1","method":"SRP_FORK","params":{"srp_version":"0.4.0","body":%s}}' % body
+    frame = '{"jsonrpc":"2.0","id":"1","method":"SRP_FORK","params":{"srp_version":"0.5.0","body":%s}}' % body
     with pytest.raises(WireError):
         decode_message(frame)
     with pytest.raises(WireError):

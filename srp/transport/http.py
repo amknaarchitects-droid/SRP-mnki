@@ -35,6 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from srp.envs.sandbox import backstop_ms
 from srp.node.daemon import SRPProviderNode
 from srp.protocol.crypto import NodeKeypair, verify_signature
 from srp.protocol.messages import (
@@ -315,7 +316,7 @@ class RemoteNode:
         self.public_key_hex = caps.public_key_hex
 
     # ------------------------------------------------------------- plumbing
-    def _call(self, method: str, params: Dict[str, Any]) -> Any:
+    def _call(self, method: str, params: Dict[str, Any], timeout_s: Optional[float] = None) -> Any:
         req_id = secrets.token_hex(12)
         ts, nonce = time.time(), secrets.token_hex(16)
         frame = {
@@ -326,8 +327,11 @@ class RemoteNode:
         data = json.dumps(frame, allow_nan=False).encode("utf-8")
         req = urllib.request.Request(self.url, data=data, headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout_s, context=self._ssl) as resp:
-                body = loads_strict(resp.read())
+            with urllib.request.urlopen(req, timeout=timeout_s or self.timeout_s, context=self._ssl) as resp:
+                raw = resp.read(MAX_FRAME_BYTES + 1)  # never buffer an unbounded body
+                if len(raw) > MAX_FRAME_BYTES:
+                    raise WireError("Response exceeds MAX_FRAME_BYTES")
+                body = loads_strict(raw)
         except urllib.error.HTTPError as exc:
             raise PermissionError(f"Node rejected command ({exc.code})") from exc
         if not isinstance(body, dict) or body.get("id") != req_id:
@@ -376,8 +380,12 @@ class RemoteNode:
 
     def step(self, branch_id: str, action: ActionPayload, request_id: Optional[str] = None,
              timeout_ms: int = 5000) -> StepResult:
+        # A step may legitimately run until the sandbox's wall-clock backstop;
+        # timing out earlier would make an honest, slow step look like a node fault.
+        deadline_s = max(self.timeout_s, backstop_ms(int(timeout_ms)) / 1000.0 + 10.0)
         r = self._call("node.step", {"branch_id": branch_id, "request_id": request_id or secrets.token_hex(8),
-                                     "timeout_ms": int(timeout_ms), "action": dataclasses.asdict(action)})
+                                     "timeout_ms": int(timeout_ms), "action": dataclasses.asdict(action)},
+                       timeout_s=deadline_s)
         return decode_body(StepResult, r)
 
     def evict_branch(self, branch_id: str) -> int:

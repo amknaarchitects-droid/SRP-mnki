@@ -14,7 +14,7 @@ Decoding is strict and never raises anything but `WireError`:
 
 Frame shape:
     {"jsonrpc": "2.0", "id": "<id>", "method": "SRP_STEP",
-     "params": {"srp_version": "0.4.0", "body": {...dataclass fields...}}}
+     "params": {"srp_version": "0.5.0", "body": {...dataclass fields...}}}
 """
 
 from __future__ import annotations
@@ -43,8 +43,8 @@ from srp.protocol.messages import (
     StepRequest,
     StepResult,
 )
+from srp.protocol.messages import PROTOCOL_VERSION
 
-PROTOCOL_VERSION = "0.4.0"
 MAX_FRAME_BYTES = 16 * 1024 * 1024
 MAX_LIST_ITEMS = 200_000
 MAX_DEPTH = 32

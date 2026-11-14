@@ -18,6 +18,7 @@ Economic security:
 from __future__ import annotations
 
 import json
+import math
 import threading
 import time
 from dataclasses import dataclass, field
@@ -133,6 +134,8 @@ class BaseConfigurableLedger:
         self._accounts: Dict[str, SettlementAccount] = {}
         self.ledger_history: List[SettlementReceipt] = []
         self.epochs: List[EpochPayout] = []
+        # slash receipt id -> (taken from unsettled balance, taken from stake)
+        self._slash_parts: Dict[str, Tuple[float, float]] = {}
 
     def _next_seq(self) -> int:
         self._seq += 1
@@ -159,8 +162,8 @@ class BaseConfigurableLedger:
 
     # ------------------------------------------------------------------ stake
     def deposit_stake(self, node_id: str, amount_units: float) -> SettlementReceipt:
-        if amount_units <= 0:
-            raise ValueError("Stake deposit must be positive")
+        if not math.isfinite(amount_units) or amount_units <= 0:
+            raise ValueError("Stake deposit must be a positive finite amount")
         with self._lock:
             acct = self.get_account(node_id)
             acct.stake_units = round(acct.stake_units + amount_units, 6)
@@ -175,7 +178,7 @@ class BaseConfigurableLedger:
         """Start unbonding stake. It stays slashable until the unbonding period ends."""
         with self._lock:
             acct = self.get_account(node_id)
-            if not 0 < amount_units <= acct.stake_units + 1e-9:
+            if not math.isfinite(amount_units) or not 0 < amount_units <= acct.stake_units + 1e-9:
                 raise ValueError("Unbond amount must be positive and at most the active stake")
             acct.stake_units = round(acct.stake_units - amount_units, 6)
             acct.unbonding.append((time.time() + self.unbonding_period_s, round(amount_units, 6)))
@@ -251,19 +254,30 @@ class BaseConfigurableLedger:
             acct.unbonding = sorted(new_unbonding)
             penalty = round(from_balance + from_stake + from_unbonding, 6)
             acct.slashed_units = round(acct.slashed_units + penalty, 6)
-            return self._receipt(
+            rec = self._receipt(
                 "slash", acct, -penalty,
                 f"Fraud slashed ({from_balance:.6f} unsettled + {from_stake + from_unbonding:.6f} "
                 f"stake): {fraud_proof.reason}",
             )
+            self._slash_parts[rec.receipt_id] = (round(from_balance, 6), round(from_stake + from_unbonding, 6))
+            return rec
 
-    def reverse_slash(self, node_id: str, amount_units: float, reason: str) -> SettlementReceipt:
-        """Refund a slash overturned on appeal (credited back to stake)."""
-        if amount_units < 0:
-            raise ValueError("Refund must be non-negative")
+    def reverse_slash(
+        self, node_id: str, amount_units: float, reason: str, slash_receipt_id: str | None = None
+    ) -> SettlementReceipt:
+        """
+        Refund a slash overturned on appeal. With the slash's receipt id, each part
+        goes back where it came from (unsettled balance, stake); without it the
+        whole amount is credited to stake.
+        """
+        if not math.isfinite(amount_units) or amount_units < 0:
+            raise ValueError("Refund must be a non-negative finite amount")
         with self._lock:
             acct = self.get_account(node_id)
-            acct.stake_units = round(acct.stake_units + amount_units, 6)
+            to_balance, to_stake = self._slash_parts.pop(slash_receipt_id, (0.0, amount_units))                 if slash_receipt_id else (0.0, amount_units)
+            amount_units = round(to_balance + to_stake, 6)
+            acct.balance_units = round(acct.balance_units + to_balance, 6)
+            acct.stake_units = round(acct.stake_units + to_stake, 6)
             acct.slashed_units = round(max(0.0, acct.slashed_units - amount_units), 6)
             acct.canary_failures = max(0, acct.canary_failures - 1)
             return self._receipt("refund", acct, amount_units, f"Slash reversed on appeal: {reason}")

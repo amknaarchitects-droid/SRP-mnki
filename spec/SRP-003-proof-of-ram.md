@@ -1,6 +1,6 @@
 # SRP-003: Proof-of-Honest-RAM (PoHR) & Verification Specification
 
-**Status:** Draft Standard (v0.4.0)  
+**Status:** Draft Standard (v0.5.0)  
 **Category:** Security & Cryptographic Verification  
 **License:** MIT / Public Domain (CC0)
 
@@ -45,7 +45,7 @@ Steps on one branch are serialised, so honest concurrent use never breaks the ch
 
 ### 2.2. Layer 2: Blind, incremental, confirmed replay audits
 
-**Runtime profiles.** A suite is deterministic only for a fixed runtime profile: `cpython-<major.minor>-<str hash algorithm>-<os>`. Within a profile the reference sandbox fixes `PYTHONHASHSEED`, disables ASLR on Linux, and scrubs memory addresses from every text path. Nodes advertise their profile, and the coordinator only accepts a node if it has an **auditor** (a trusted node it controls) with the same profile.
+**Runtime profiles.** A suite is deterministic only for a fixed runtime profile: `cpython-<major.minor>-<str hash algorithm>-<os>-<cpu arch>` (the architecture was added in v0.5.0: libm and float behaviour can differ between x86_64 and aarch64). Within a profile the reference sandbox fixes `PYTHONHASHSEED`, disables ASLR on Linux, and scrubs memory addresses from every text path. Nodes advertise their profile, and the coordinator only accepts a node if it has an **auditor** (a trusted node it controls) with the same profile.
 
 **Audits.**
 * **Lineage.** Each branch keeps an immutable lineage of committed steps: the action, its timeout and the node's signed receipt. Each step's digest is computed over the previous digest, the timeout and the action.
@@ -59,7 +59,9 @@ Steps on one branch are serialised, so honest concurrent use never breaks the ch
 * Such a step is always audited. If the auditor finishes it in under 25% of the backstop, the node gets a *strike*. `timeout_strike_limit` strikes means quarantine.
 * Claiming timeouts therefore gains nothing and cannot hide a branch from audits.
 
-**Canaries.** Canary tasks run through the ordinary fork/step path with audits still eligible. Each canary is sent to a random node, in random order, and optionally after a prefix of real committed actions, so it can sit at any depth. When the expected values are not supplied, ground truth comes from the auditor. With `canary_rate > 0`, rounds are scheduled in the background.
+**Canaries.** Canary tasks run through the ordinary fork/step path with audits still eligible. Each canary is sent to a random node, in random order, and optionally after a prefix of real committed actions, so it can sit at any depth. Registered expected values describe the canary at the root snapshot, so they are used only when there is no prefix; otherwise (and whenever they are not supplied) ground truth comes from the auditor. If that replay shows a committed prefix step was a lie, that step's receipt is recorded as `replay_mismatch`. A canary whose step (or prefix step) hits the wall-clock backstop is *inconclusive*, never fraud. With `canary_rate > 0`, rounds are scheduled in the background; canary steps never schedule further canaries, and at most `max_concurrent_canaries` (default 2) run at once.
+
+**Auditors** use only the public node API (fork replies and receipts carry every state hash they need), so a `RemoteNode` can serve as one. Coordinator-side audit errors are counted as inconclusive *and* reported (`replay_audit_errors`, `last_audit_error` in telemetry): a broken auditor means fraud goes undetected.
 
 ### 2.3. Layer 3: Chained residency proofs (`srp/protocol/residency.py`)
 
@@ -92,19 +94,20 @@ The node passes when the median over `ping_repeats` is at most `max_lookup_us` (
 
 | Kind | Evidence | Consequence |
 |---|---|---|
-| `replay_mismatch`, `canary_mismatch` | node-signed receipt + root snapshot id + content hash + full lineage (actions and timeouts) + runtime profile | **slashable**, quarantine |
+| `replay_mismatch`, `canary_mismatch` | node-signed receipt for the last lineage step + root snapshot id + content hash + manifest identity digest + full lineage (actions and timeouts) + runtime profile | **slashable**, quarantine |
 | `protocol_fault` (bad signature, inconsistent receipt, fork-id mismatch, repeated false timeouts) | not attributable to a third party | quarantine only, **no slash** |
 
+* **Binding.** A proof is slashable only if its receipt is for the final lineage step: same root snapshot, action hash and timeout. Replay additionally requires the receipt's `parent_state_hash` to equal the replayed pre-state, and (when present) the manifest's `identity_digest` to match, so an honest receipt cannot be paired with someone else's history.
 * **Checking a proof.** `verify_fraud_proof_by_replay(proof, manifest)` lets anyone with the same runtime profile confirm a slashable proof. `SettlementProvider.record_canary_failure` refuses any proof that is not self-contained.
 * **Quarantine.** It binds both the `node_id` and the public key, refuses residency payments, and is persisted (`state_path`) together with identities, strikes, fraud evidence, the ballast master secret and the coordinator key.
-* **Appeals.** `appeal_fraud(i)` re-runs the proof's lineage. If the fraud is not confirmed, the node is reinstated and the slash is refunded.
+* **Appeals.** `appeal_fraud(i)` re-runs the proof's lineage. If the fraud is not confirmed, the proof is marked overturned and the slash is refunded. The node is reinstated only if no other fraud proof or protocol fault still stands against its id or key.
 
 ---
 
 ## 3. Agent-Code Sandbox (`srp/envs/sandbox.py`, `srp/envs/fuel.py`)
 
-1. **Static policy.** No imports, async, classes, `global`/`nonlocal` or bare `except:`. No `__dunder__` names, definitions, arguments or string constants. No `_private` attributes, and no frame/code/traceback introspection attributes.
-2. **Fuel.** Loops, calls, lambdas, comprehension items and iteration-consuming builtins cost fuel. `**`, `*` and `<<` are guarded against huge integer or sequence results. Fuel equals `timeout_ms × 2000`, and running out raises the uncatchable `FuelExhausted`.
+1. **Static policy.** No imports, async, classes, `global`/`nonlocal` or bare `except:`. No `__dunder__` names, definitions, arguments, capture names or string constants. No `_private` attributes, and no frame/code/traceback introspection attributes, including attribute names in `match` class patterns (`case C(attr=x)`). `.format`/`.format_map` may only be called directly (an alias would bypass address scrubbing). AST nesting is limited to 100 levels and 50,000 nodes, so the recursive instrumentation passes cannot overflow the node's stack.
+2. **Fuel.** Loops, calls, lambdas, comprehension items and iteration-consuming builtins cost fuel. `**`, `*` and `<<` are guarded against huge integer or sequence results. Fuel equals `timeout_ms × 2000`, and running out raises the uncatchable `FuelExhausted`. The metered `list`/`tuple`/`set`/`frozenset` are classes whose `isinstance` checks behave like the real types.
 3. **Process isolation.** Each run is a fresh `python -s -S` (plus `-P` on 3.11+) with a fully controlled environment, minimal builtins, and inputs passed over stdin. `-I` is deliberately not used: it implies `-E`, which would ignore `PYTHONHASHSEED=0` and randomise string hashing per run. The child strips `''`/`.` from `sys.path` before its first import, so modules planted in the working directory are never loaded. The pinned tests run in their **own namespace** and see only the solution's public, non-builtin names, so a solution cannot shadow `sum`, `len` and the like.
 4. **Audit hook (every OS).** Once armed, every CPython audit event is refused except executing the two pre-compiled code objects. That covers imports, `open`, sockets, subprocess/`os.*`, ctypes, `sys._getframe`, and restricted attribute reads such as `gi_frame`, `tb_frame` and `__code__`. The hook still holds if layer 1 is bypassed (tested).
 5. **OS isolation.**
@@ -112,7 +115,7 @@ The node passes when the median over `ping_repeats` is at most `max_lookup_us` (
      * a user + network namespace with no interfaces;
      * ASLR disabled;
      * `RLIMIT_AS`, `CPU`, `FSIZE=0`, `NPROC=0`, `NOFILE` and `CORE` limits;
-     * a seccomp-BPF filter for **x86_64 and aarch64** (any other ABI on the same kernel, such as x32 or compat arm32, is killed) returning `EPERM` for: network calls, process creation, `exec`, `ptrace`, namespace/mount changes, kernel attack-surface calls, and write-capable `open`/rename/unlink/mkdir/chmod/truncate.
+     * a seccomp-BPF filter for **x86_64 and aarch64** (any other ABI on the same kernel, such as x32 or compat arm32, is killed) returning `EPERM` for: network calls, process creation, `exec`, signals to other processes (`kill`, `tkill`, `tgkill`, `pidfd_send_signal`), `ptrace`, namespace/mount changes, kernel attack-surface calls, and write-capable `open`/rename/unlink/mkdir/chmod/truncate.
    * **Windows:** the child starts suspended, joins a kill-on-close Job Object (memory cap, CPU-time cap, single process), then resumes. Network is refused by layer 4 only.
 6. **Hidden grading inputs.** The agent cannot `read_file` (or overwrite) the pinned test file, the run log or the property salt.
 7. **Hash-order determinism.** Set iteration order follows element hashes, and for functions, types, exceptions, iterators, NaN (and `None` before 3.12) the hash is a memory address. Every way agent code can build or grow a set (literals, comprehensions, `set()`/`frozenset()`, `add`/`update`/`union`/..., `| & ^ -` and their augmented forms, including on dict views) goes through deterministic set types that raise `TypeError` for such elements. Sets of numbers, strings, bytes, ranges and tuples/frozensets of those behave as usual.

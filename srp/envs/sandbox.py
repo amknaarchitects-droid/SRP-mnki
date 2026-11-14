@@ -53,10 +53,11 @@ from srp.envs import fuel
 
 MAX_CODE_CHARS = 200_000
 MAX_AST_NODES = 50_000
+MAX_AST_DEPTH = 100  # keeps every recursive AST pass far below the recursion limit
 MAX_STDOUT_CHARS = 65_536
 DEFAULT_MEMORY_MB = 256
 MIN_TIMEOUT_MS = 100
-MAX_TIMEOUT_MS = 30_000
+MAX_TIMEOUT_MS = 60_000  # same ceiling as the node's step timeout
 
 SAFE_BUILTIN_NAMES = (
     "abs", "all", "any", "bin", "bool", "chr", "dict", "divmod", "enumerate",
@@ -87,16 +88,38 @@ class SandboxPolicyError(PermissionError):
     """Raised when code violates the static sandbox policy."""
 
 
+def _check_attr_name(name: str, what: str = "attribute") -> None:
+    if name.startswith("_"):
+        raise SandboxPolicyError(f"Private/dunder {what} '{name}' is blocked")
+    if name in FORBIDDEN_ATTRS:
+        raise SandboxPolicyError(f"Introspection {what} '{name}' is blocked")
+
+
 def validate_code(code: str) -> ast.Module:
     """Parse and enforce the static sandbox policy; returns the AST."""
     if len(code) > MAX_CODE_CHARS:
         raise SandboxPolicyError(f"Code exceeds {MAX_CODE_CHARS} characters")
-    tree = ast.parse(code)
-    count = 0
-    for node in ast.walk(tree):
+    try:
+        tree = ast.parse(code)
+    except (RecursionError, MemoryError) as exc:
+        raise SandboxPolicyError(f"Code is too deeply nested to parse ({type(exc).__name__})") from exc
+
+    # Depth and size first, iteratively: every later pass (instrumentation,
+    # unparse, the child's compile) recurses once per nesting level.
+    count, stack = 0, [(tree, 0)]
+    while stack:
+        node, depth = stack.pop()
         count += 1
         if count > MAX_AST_NODES:
             raise SandboxPolicyError(f"Code exceeds {MAX_AST_NODES} AST nodes")
+        if depth > MAX_AST_DEPTH:
+            raise SandboxPolicyError(f"Code nesting exceeds depth {MAX_AST_DEPTH}")
+        stack.extend((child, depth + 1) for child in ast.iter_child_nodes(node))
+
+    # `.format` / `.format_map` are scrubbed only when called directly
+    # (`'{}'.format(x)`); an alias (`g = '{}'.format`) would format raw addresses.
+    called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+    for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             raise SandboxPolicyError("Import statements are blocked in the sandbox")
         if isinstance(node, (ast.AsyncFunctionDef, ast.Await, ast.AsyncFor, ast.AsyncWith)):
@@ -110,10 +133,18 @@ def validate_code(code: str) -> ast.Module:
         if isinstance(node, ast.Name) and node.id.startswith("__"):
             raise SandboxPolicyError(f"Dunder name '{node.id}' is blocked in sandbox")
         if isinstance(node, ast.Attribute):
-            if node.attr.startswith("_"):
-                raise SandboxPolicyError(f"Private/dunder attribute '{node.attr}' is blocked")
-            if node.attr in FORBIDDEN_ATTRS:
-                raise SandboxPolicyError(f"Introspection attribute '{node.attr}' is blocked")
+            _check_attr_name(node.attr)
+            if node.attr in ("format", "format_map") and id(node) not in called:
+                raise SandboxPolicyError(f"'.{node.attr}' may only be called directly")
+        # Structural pattern matching reads attributes by name (`case C(attr=x)`)
+        # and binds names, bypassing the Attribute/Name checks above.
+        if isinstance(node, ast.MatchClass):
+            for attr in node.kwd_attrs:
+                _check_attr_name(attr, "pattern attribute")
+        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name and node.name.startswith("__"):
+            raise SandboxPolicyError(f"Dunder capture name '{node.name}' is blocked")
+        if isinstance(node, ast.MatchMapping) and node.rest and node.rest.startswith("__"):
+            raise SandboxPolicyError(f"Dunder capture name '{node.rest}' is blocked")
         if isinstance(node, (ast.FunctionDef, ast.Lambda)) and getattr(node, "name", "").startswith("__"):
             raise SandboxPolicyError(f"Dunder definition '{node.name}' is blocked")
         if isinstance(node, ast.arg) and node.arg.startswith("__"):
@@ -254,7 +285,8 @@ SECCOMP_DENY_X86_64 = {
     53: "socketpair", 54: "setsockopt", 288: "accept4", 299: "recvmmsg", 307: "sendmmsg",
     # process creation / exec / tracing
     56: "clone", 57: "fork", 58: "vfork", 59: "execve", 322: "execveat", 435: "clone3",
-    62: "kill", 101: "ptrace", 310: "process_vm_readv", 311: "process_vm_writev",
+    62: "kill", 200: "tkill", 234: "tgkill", 424: "pidfd_send_signal",
+    101: "ptrace", 310: "process_vm_readv", 311: "process_vm_writev",
     # filesystem mutation
     2: "open", 85: "creat", 437: "openat2", 76: "truncate", 77: "ftruncate",
     82: "rename", 264: "renameat", 316: "renameat2", 83: "mkdir", 258: "mkdirat",
@@ -281,7 +313,7 @@ SECCOMP_DENY_AARCH64 = {
     211: "sendmsg", 212: "recvmsg", 242: "accept4", 243: "recvmmsg", 269: "sendmmsg",
     # process creation / exec / tracing
     220: "clone", 221: "execve", 281: "execveat", 435: "clone3",
-    129: "kill", 117: "ptrace", 270: "process_vm_readv", 271: "process_vm_writev",
+    129: "kill", 130: "tkill", 131: "tgkill", 424: "pidfd_send_signal", 117: "ptrace", 270: "process_vm_readv", 271: "process_vm_writev",
     # filesystem mutation
     437: "openat2", 45: "truncate", 46: "ftruncate", 38: "renameat", 276: "renameat2",
     34: "mkdirat", 37: "linkat", 35: "unlinkat", 36: "symlinkat", 52: "fchmod",
@@ -397,8 +429,13 @@ import sys
 sys.path[:] = [p for p in sys.path if p and p != "."]
 import json, re, builtins as _b
 _ADDR = re.compile(r"0x[0-9a-fA-F]{4,}")
+_ADDR_B = re.compile(rb"0x[0-9a-fA-F]{4,}")
 def _scrub_text(s):
-    return _ADDR.sub("0x?", s) if isinstance(s, str) else s
+    if isinstance(s, str):
+        return _ADDR.sub("0x?", s)
+    if isinstance(s, bytes):          # b"%r" % obj formats addresses too
+        return _ADDR_B.sub(b"0x?", s)
+    return s
 
 ''' + fuel.RUNTIME_SOURCE + r'''
 
@@ -667,11 +704,14 @@ _run()
 
 
 def _linux_preexec(memory_mb: int, cpu_seconds: int, probe: bool = False):  # pragma: no cover
-    def _apply() -> None:
-        import ctypes
-        import resource
+    # Import and load libc *before* fork: preexec_fn runs in the forked child of a
+    # possibly multi-threaded server, where taking the import lock can deadlock.
+    import ctypes
+    import resource
 
-        libc = ctypes.CDLL(None, use_errno=True)
+    libc = ctypes.CDLL(None, use_errno=True)
+
+    def _apply() -> None:
         CLONE_NEWUSER, CLONE_NEWNET = 0x10000000, 0x40000000
         if libc.unshare(CLONE_NEWUSER | CLONE_NEWNET) != 0 and probe:
             raise OSError(ctypes.get_errno(), "unshare failed")
@@ -694,9 +734,9 @@ def _linux_preexec(memory_mb: int, cpu_seconds: int, probe: bool = False):  # pr
 
 
 def _posix_preexec(memory_mb: int, cpu_seconds: int):  # pragma: no cover - non-Linux POSIX
-    def _apply() -> None:
-        import resource
+    import resource  # before fork, see _linux_preexec
 
+    def _apply() -> None:
         mem = memory_mb * 1024 * 1024
         for res, val in (
             (resource.RLIMIT_AS, mem),

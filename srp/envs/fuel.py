@@ -117,6 +117,14 @@ RUNTIME_SOURCE = r'''
 class FuelExhausted(BaseException):
     pass
 
+class _MeteredTypeMeta(type):
+    def __instancecheck__(cls, obj):
+        return isinstance(obj, cls._srp_base)
+    def __subclasscheck__(cls, sub):
+        return issubclass(sub, cls._srp_base)
+    def __getattr__(cls, name):          # list.append, frozenset.union, ...
+        return getattr(cls._srp_ctor, name)
+
 def _make_fuel(limit, safe, max_bits, max_items):
     state = [0]
     def tick():
@@ -168,10 +176,22 @@ def _make_fuel(limit, safe, max_bits, max_items):
             return fn(*args, **kwargs)
         wrapper.__name__ = getattr(fn, "__name__", "builtin")
         return wrapper
+    def _metered_type(ctor):
+        # A class (not a function) so `isinstance(x, list)` keeps working; it
+        # meters the constructor's iterable and delegates everything else.
+        base = next(t for t in (list, tuple, set, frozenset) if issubclass(ctor, t))
+        def __new__(cls, *args, **kwargs):
+            if args:
+                args = (it(args[0]),) + args[1:]
+            return ctor(*args, **kwargs)
+        return _MeteredTypeMeta(base.__name__, (), {
+            "__new__": __new__, "__module__": "builtins", "_srp_base": base, "_srp_ctor": ctor})
     for name in ("sum", "sorted", "list", "tuple", "set", "frozenset", "min", "max", "any", "all"):
         if name in safe:
             real = safe[name]
-            if name in ("min", "max"):
+            if name in ("list", "tuple", "set", "frozenset"):
+                safe[name] = _metered_type(real)
+            elif name in ("min", "max"):
                 # min/max(a, b, ...) with several positional args is not an iteration
                 def _mm(*args, _real=real, **kwargs):
                     if len(args) == 1:

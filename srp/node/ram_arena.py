@@ -446,10 +446,11 @@ class VolatileRAMArena:
                 raise RuntimeError(f"Snapshot '{manifest.snapshot_id}' is being evicted")
             existing = self._snapshots.get(manifest.snapshot_id)
             if existing is not None:
-                if existing.state_hash != state_hash:
+                if (existing.state_hash != state_hash or existing.suite != manifest.suite
+                        or existing.runtime != manifest.runtime):
                     raise ValueError(
                         f"Snapshot id '{manifest.snapshot_id}' is already pinned with "
-                        "different content; snapshot ids must be content-unique"
+                        "different content, suite or runtime; snapshot ids must be unique"
                     )
                 return existing
 

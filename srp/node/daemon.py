@@ -11,6 +11,7 @@ with the public key published in `NodeCapabilities`.
 
 from __future__ import annotations
 
+import json
 import math
 import threading
 import time
@@ -125,6 +126,11 @@ class SRPProviderNode:
         """
         req_id = request_id or f"req_{uuid.uuid4().hex}"
         timeout_ms = int(max(1, min(int(timeout_ms), MAX_STEP_TIMEOUT_MS)))
+        try:  # reject before touching the branch: verifiers write action text into files
+            json.dumps({"command": action.command, "payload": action.payload},
+                       ensure_ascii=False, allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Action is not valid JSON text: {exc}") from exc
         branch = self.arena.get_branch(branch_id)
         with branch._step_lock:
             if branch.evicted:

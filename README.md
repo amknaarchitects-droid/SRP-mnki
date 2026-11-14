@@ -1,7 +1,7 @@
 # Share RAM Protocol (SRP)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Protocol Version](https://img.shields.io/badge/SRP-v0.4.0-brightgreen.svg)](spec/SRP-001-wire-protocol.md)
+[![Protocol Version](https://img.shields.io/badge/SRP-v0.5.0-brightgreen.svg)](spec/SRP-001-wire-protocol.md)
 [![Protocol Tax](https://img.shields.io/badge/Protocol_Fee-0%25_Forever-orange.svg)](spec/SRP-004-settlement-api.md)
 
 > **An Open-Source Public Good for Humanity:** Turn the world's spare consumer and workstation RAM into a zero-disk-wear, Copy-on-Write (CoW) in-memory execution and verification fabric for AI Reinforcement Learning (RL) post-training.
@@ -91,14 +91,14 @@ SRP is a public good with **0% protocol fees** and is completely agnostic to how
 
 ---
 
-## Security Model (v0.4.0)
+## Security Model (v0.5.0)
 
 | Layer | What it guarantees |
 |---|---|
 | **Node identity** | Ed25519 key per node, with proof-of-possession at `NODE_REGISTER`. Quarantine binds both the id and the key, and survives restarts (`state_path`). |
 | **Receipts (V3)** | Sign the whole observation, billed metrics and timeout. They are bound to the coordinator's request id, coordinator-minted branch ids, the step index and the coordinator's own copy of the hash chain. Rewards must be finite. |
-| **Correctness** | Blind, incremental replay audits on an auditor with the same runtime profile. Every committed step since the last checkpoint is re-checked, and rewarded, terminal and timed-out steps are always audited. A mismatch must be confirmed by repeated runs. Canaries run at random depths. |
-| **Evidence** | Slashable fraud proofs are self-contained (signed receipt + lineage), and anyone can re-check them with `verify_fraud_proof_by_replay`. Appeals can reinstate a node and refund its slash. |
+| **Correctness** | Blind, incremental replay audits on an auditor with the same runtime profile (Python version, hash algorithm, OS and CPU architecture). Every committed step since the last checkpoint is re-checked, and rewarded, terminal and timed-out steps are always audited. A mismatch must be confirmed by repeated runs. Canaries run at random depths; a canary that hits the wall-clock backstop is inconclusive, never fraud. |
+| **Evidence** | Slashable fraud proofs are self-contained (signed receipt + lineage + manifest identity), and the receipt must be for the lineage's last step. Anyone can re-check them with `verify_fraud_proof_by_replay`. Appeals refund the slash to where it came from, and reinstate the node only if nothing else stands against it. |
 | **RAM residency** | Chained (pointer-chasing) challenges over time-memory-hard, node-unique ballast, with the RTT baseline subtracted. Only proven ballast bytes earn lease. |
 | **Agent code** | Static policy, deterministic fuel, process isolation, an audit hook blocking every CPython audit event, address scrubbing, and hash-order-deterministic sets. The tests run in a separate namespace and the test file is hidden. On Linux, the sandbox also adds a network namespace, seccomp-BPF (x86_64 and aarch64), no-ASLR and rlimits. |
 | **Grading** | Pinned tests can use seeded property helpers (`srp_randint`, `srp_choice`, `srp_random`). The seed depends on a hidden salt and the submitted code, so visible examples cannot simply be hard-coded. |

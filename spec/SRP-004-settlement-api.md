@@ -1,6 +1,6 @@
 # SRP-004: General Economic & Settlement Interface Specification
 
-**Status:** Draft Standard (v0.4.0)  
+**Status:** Draft Standard (v0.5.0)  
 **Category:** Economics & Incentives  
 **License:** MIT / Public Domain (CC0)
 
@@ -41,7 +41,8 @@ class SettlementProvider(Protocol):
 * A slash removes `slash_penalty_units`, taken from the **unsettled** balance first, then from active stake, then from unbonding stake. Earnings that were already paid out are never treated as a substitute for stake.
 * **Unbonding:** `request_unbond` moves stake into an unbonding queue that stays slashable for `unbonding_period_s` before `withdraw_unbonded` releases it.
 * **Quarantine:** a slashed node gets no new work, and neither its `node_id` nor its key can re-register. `min_stake_units` is re-checked before routing, not only at registration.
-* **Appeals:** a slash overturned on appeal (SRP-003 §2.4) is refunded via `reverse_slash`.
+* **Appeals:** a slash overturned on appeal (SRP-003 §2.4) is refunded via `reverse_slash`. Given the slash's receipt id, each part goes back where it came from (the unsettled balance or stake); without it the whole amount is credited to stake.
+* **Amounts:** stake deposits, unbonds and refunds MUST be finite; deposits and unbonds MUST be positive.
 * **Choosing parameters.** Faking steps is unprofitable in expectation when $\text{stake} \cdot \text{audit\_rate} \gtrsim \beta$ per step. With no stake requirement, the only cost of a new identity is the work needed to build a balance, so permissionless networks SHOULD require stake.
 
 ## 5. Epoch Payouts

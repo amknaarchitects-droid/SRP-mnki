@@ -4,7 +4,6 @@ Universal RL Framework Bridges
 Drop-in adapters for:
   1. OpenAI Gym / Gymnasium (`SRPEnv`, `srp.make()`)
   2. GRPO / MCTS Parallel Rollout Pool (`RolloutPool` with sub-ms `SRP_FORK`)
-  3. Prime Intellect `verifiers` (`PrimeVerifiersBridge`)
 """
 
 from __future__ import annotations

@@ -8,6 +8,7 @@ can explore branching tactic trees (MCTS / GRPO) without reloading heavy math li
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, List, Tuple
 
 from srp.node.ram_arena import CoWBranch
@@ -79,6 +80,21 @@ class MathLeanVerifier:
 
             current_goal = goals[0]
             transition_key = f"{current_goal}::{tactic}"
+
+            # '::' separates goal from tactic in transition keys. A tactic that
+            # contains it could name another goal's transition (e.g. the tactic
+            # "EASY::finish" while proving HARD) and close the wrong goal.
+            if "::" in tactic or not tactic:
+                return (
+                    StepObservation(
+                        stdout="",
+                        stderr=f"Tactic '{tactic}' failed on goal: {current_goal}",
+                        exit_code=1,
+                        structured_data={"goals": goals},
+                    ),
+                    0.0,
+                    False,
+                )
 
             # Check transition table or built-in symbolic rewrite rules
             if transition_key in valid_rules:
@@ -175,13 +191,31 @@ class MathLeanVerifier:
         if tactic in ("ring", "omega"):
             if lhs == rhs:
                 return True
-            # Associative/commutative addition check (strip grouping parentheses when only '+' is present)
+            # Associative/commutative addition: both sides must be plain sums of
+            # atoms, with parentheses used only for grouping. `f(b+c)` is function
+            # application, not grouping, so stripping its parentheses is unsound.
             if "+" in lhs and "+" in rhs:
-                if not any(op in norm_goal for op in ("-", "*", "/", "^")):
-                    clean_lhs = lhs.replace("(", "").replace(")", "")
-                    clean_rhs = rhs.replace("(", "").replace(")", "")
-                    terms_l = [t for t in clean_lhs.split("+") if t]
-                    terms_r = [t for t in clean_rhs.split("+") if t]
-                    if terms_l and sorted(terms_l) == sorted(terms_r):
-                        return True
+                terms_l = MathLeanVerifier._sum_terms(lhs)
+                terms_r = MathLeanVerifier._sum_terms(rhs)
+                if terms_l and terms_r is not None and sorted(terms_l) == sorted(terms_r):
+                    return True
         return False
+
+    _ATOM = re.compile(r"[A-Za-z_][A-Za-z0-9_']*|[0-9]+")
+
+    @staticmethod
+    def _sum_terms(side: str):
+        """Atoms of a parenthesised sum like `a+(b+c)`, or None if it is anything else."""
+        if re.search(r"[A-Za-z0-9_')]\(|\)[A-Za-z0-9_'(]", side):
+            return None  # application or implicit multiplication
+        depth = 0
+        for ch in side:
+            depth += (ch == "(") - (ch == ")")
+            if depth < 0:
+                return None
+        if depth:
+            return None
+        terms = side.replace("(", "").replace(")", "").split("+")
+        if not all(MathLeanVerifier._ATOM.fullmatch(t) for t in terms):
+            return None
+        return terms
