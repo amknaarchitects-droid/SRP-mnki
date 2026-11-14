@@ -7,7 +7,9 @@
 
 > **An Open-Source Public Good for Humanity:** Turn the world's spare consumer and workstation RAM into a zero-disk-wear, Copy-on-Write (CoW) in-memory execution and verification fabric for AI Reinforcement Learning (RL) post-training.
 
-**Status: alpha.** This is a specification and a reference implementation with simulated environments. The capacity and savings figures below are estimates and worked examples, not measurements; the economics against rented datacenter RAM have not been analysed yet. See the [roadmap](ROADMAP.md) for what comes next.
+**Status: alpha.** This is a specification and a reference implementation with simulated environments. See the [roadmap](ROADMAP.md) for what comes next.
+
+**Where SRP fits, honestly.** Our [economics and latency analysis](docs/ECONOMICS.md) finds that SRP does **not** beat renting datacenter RAM for paid capacity, and that it is a poor fit for tight environment loops over the internet: every call costs about two network round trips. Its credible use is **donated capacity** (for example open-science runs) for **latency-tolerant, multi-turn workloads**, where each turn involves seconds of model generation. The Copy-on-Write arena is useful on its own, inside or outside a datacenter.
 
 Created and maintained by **Shady Sharaf (mnki)**.
 
@@ -18,8 +20,8 @@ Created and maintained by **Shady Sharaf (mnki)**.
 As frontier AI shifts toward **Reinforcement Learning with Verifiable Rewards (RLVR)**, **Group Relative Policy Optimization (GRPO)**, and **Monte Carlo Tree Search (MCTS)**, the primary infrastructure bottleneck is no longer just GPU FLOPs—it is **System RAM for parallel environment sandboxes**:
 
 * **Mostly Idle Memory (estimate):** During multi-turn RL rollouts (coding, formal math, web navigation, 3D CAD), each sandbox executes an action for a short time and then sits frozen in RAM waiting for the GPU cluster to generate the next reasoning token. We expect sandboxes to be idle for the large majority of a rollout; this has not been measured yet.
-* **The Container RAM Wall (worked example):** 100,000 isolated containers at 500 MB–2 GB each would need 50 TB to 200 TB of system RAM. The container count and sizes are illustrative assumptions, not figures from a specific training run.
-* **Zero Disk Wear by Design:** Unlike traditional distributed compute networks that thrash contributor SSDs, SRP keeps all environment state **in volatile RAM (`VolatileRAMArena`)** using **4 KB page-granular Copy-on-Write (CoW)** snapshots. When an AI model forks 32 parallel GRPO branches from a 500 MB environment snapshot, SRP shares the immutable base pages in RAM and allocates only the mutated delta pages per branch, with **zero bytes written to disk**. In that worked example (16 KB of changes per branch) nearly all pages stay shared. The bundled demo, with much smaller snapshots, reports about 75% saved by the arena's own page accounting. OS-level measurements are planned for v0.6.
+* **The Container RAM Wall (worked example):** 100,000 isolated containers at 500 MB–2 GB each would need 50 TB to 200 TB of system RAM. The container count and sizes are illustrative assumptions, not figures from a specific training run. Copy-on-Write sharing shrinks this figure in a datacenter just as much as on contributor machines.
+* **Zero Disk Wear by Design:** Unlike traditional distributed compute networks that thrash contributor SSDs, SRP keeps all environment state **in volatile RAM (`VolatileRAMArena`)** using **4 KB page-granular Copy-on-Write (CoW)** snapshots. Forked branches share the immutable base pages and allocate only the pages they change, with **zero bytes written to disk**. Measured at the OS level, 64 branches forked from a 64 MB snapshot, each writing 16 KB, used **97% less memory** than 64 full copies ([benchmark](benchmarks/results/RESULTS.md)). A single pinned snapshot currently costs about 2.1× its size, a known overhead listed in the [analysis](docs/ECONOMICS.md#23-memory-saved-by-copy-on-write).
 
 ---
 
@@ -145,7 +147,16 @@ coord.register_node(RemoteNode("https://host:8443/srp/v1", coord.keypair, node_i
 pytest -v
 ```
 
-Some sandbox tests need Linux kernel features and are skipped on other systems. CI runs the suite and the demo on Linux and Windows.
+Some sandbox tests need Linux kernel features and are skipped on other systems. CI runs the suite, the demo and a benchmark smoke run on Linux and Windows.
+
+## Benchmarks
+
+```bash
+pip install -e ".[crypto,dev,bench]"
+python -m benchmarks
+```
+
+Measures step latency, throughput under simulated network round-trip times, OS-level memory saved by Copy-on-Write, and replay-audit overhead. Results are written to [`benchmarks/results/`](benchmarks/results/RESULTS.md) and analysed in [docs/ECONOMICS.md](docs/ECONOMICS.md).
 
 ---
 

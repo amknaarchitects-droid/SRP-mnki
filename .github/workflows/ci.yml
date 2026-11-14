@@ -33,3 +33,5 @@ jobs:
         run: python -m pytest -v -rs
       - name: End-to-end demo
         run: python -m srp.cli demo
+      - name: Benchmark smoke run
+        run: python -m benchmarks --quick --out bench-smoke

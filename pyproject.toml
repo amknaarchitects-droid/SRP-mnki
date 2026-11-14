@@ -41,6 +41,7 @@ dependencies = []
 crypto = ["cryptography>=41.0.0"]
 gym = ["gymnasium>=0.29.0"]
 dev = ["pytest>=7.4.0"]
+bench = ["psutil>=5.9.0"]
 
 [project.scripts]
 srp = "srp.cli:main"

@@ -1,0 +1,83 @@
+{
+  "benchmark": "cow_memory",
+  "duration_s": 3.5,
+  "environment": {
+    "commit": "1fd35e50f9bc",
+    "cpu": "AMD Ryzen 5 5600H with Radeon Graphics",
+    "generated_utc": "2026-11-14T23:29:19Z",
+    "implementation": "CPython",
+    "logical_cpus": 12,
+    "machine": "x86_64",
+    "os": "Linux 6.18.33.2-microsoft-standard-WSL2 (WSL2)",
+    "python": "3.14.4",
+    "total_ram_gb": 3.5
+  },
+  "quick": false,
+  "rows": [
+    {
+      "arena_reported_savings_percent": 49.99,
+      "arena_savings_vs_naive_percent": -0.02,
+      "arena_used_bytes": 67125248,
+      "branches": 1,
+      "delta_bytes_per_branch": 16384,
+      "fork_ms": 0.07,
+      "naive_bytes": 67108864,
+      "os_savings_vs_naive_percent": -111.29,
+      "rss_branches_bytes": 8192,
+      "rss_overhead_factor_on_snapshot": 2.113,
+      "rss_per_branch_bytes": 8192,
+      "rss_snapshot_bytes": 141787136,
+      "rss_total_bytes": 141795328,
+      "snapshot_bytes": 67108864
+    },
+    {
+      "arena_reported_savings_percent": 79.98,
+      "arena_savings_vs_naive_percent": 74.98,
+      "arena_used_bytes": 67174400,
+      "branches": 4,
+      "delta_bytes_per_branch": 16384,
+      "fork_ms": 0.082,
+      "naive_bytes": 268435456,
+      "os_savings_vs_naive_percent": 46.28,
+      "rss_branches_bytes": 0,
+      "rss_overhead_factor_on_snapshot": 2.149,
+      "rss_per_branch_bytes": 0,
+      "rss_snapshot_bytes": 144199680,
+      "rss_total_bytes": 144199680,
+      "snapshot_bytes": 67108864
+    },
+    {
+      "arena_reported_savings_percent": 94.1,
+      "arena_savings_vs_naive_percent": 93.73,
+      "arena_used_bytes": 67371008,
+      "branches": 16,
+      "delta_bytes_per_branch": 16384,
+      "fork_ms": 0.149,
+      "naive_bytes": 1073741824,
+      "os_savings_vs_naive_percent": 86.57,
+      "rss_branches_bytes": 0,
+      "rss_overhead_factor_on_snapshot": 2.148,
+      "rss_per_branch_bytes": 0,
+      "rss_snapshot_bytes": 144150528,
+      "rss_total_bytes": 144150528,
+      "snapshot_bytes": 67108864
+    },
+    {
+      "arena_reported_savings_percent": 98.44,
+      "arena_savings_vs_naive_percent": 98.41,
+      "arena_used_bytes": 68157440,
+      "branches": 64,
+      "delta_bytes_per_branch": 16384,
+      "fork_ms": 0.227,
+      "naive_bytes": 4294967296,
+      "os_savings_vs_naive_percent": 96.64,
+      "rss_branches_bytes": 86016,
+      "rss_overhead_factor_on_snapshot": 2.148,
+      "rss_per_branch_bytes": 1344,
+      "rss_snapshot_bytes": 144154624,
+      "rss_total_bytes": 144240640,
+      "snapshot_bytes": 67108864
+    }
+  ],
+  "snapshot_mb": 64
+}

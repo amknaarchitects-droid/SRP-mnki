@@ -1,0 +1,793 @@
+{
+  "bandwidth_mbit": null,
+  "benchmark": "network_simulation",
+  "duration_s": 143.7,
+  "environment": {
+    "commit": "1fd35e50f9bc",
+    "cpu": "AMD Ryzen 5 5600H with Radeon Graphics",
+    "generated_utc": "2026-11-14T23:29:19Z",
+    "implementation": "CPython",
+    "logical_cpus": 12,
+    "machine": "x86_64",
+    "os": "Linux 6.18.33.2-microsoft-standard-WSL2 (WSL2)",
+    "python": "3.14.4",
+    "total_ram_gb": 3.5
+  },
+  "handshake_round_trips_per_call": 1.0,
+  "quick": false,
+  "tls": false,
+  "workloads": {
+    "code": {
+      "calls_per_episode": 2,
+      "conditions": [
+        {
+          "added_step_p50_ms": 0.0,
+          "concurrency": 1,
+          "episode": {
+            "max_ms": 53.3514,
+            "mean_ms": 45.1918,
+            "min_ms": 40.0313,
+            "n": 16,
+            "p50_ms": 44.7062,
+            "p95_ms": 53.3514,
+            "p99_ms": 53.3514
+          },
+          "episodes": 16,
+          "episodes_per_s": 22.112,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 0,
+          "step": {
+            "max_ms": 51.1318,
+            "mean_ms": 43.0787,
+            "min_ms": 37.9987,
+            "n": 16,
+            "p50_ms": 42.4395,
+            "p95_ms": 51.1318,
+            "p99_ms": 51.1318
+          },
+          "steps_per_s": 22.112,
+          "throughput_vs_best_local": 1.0,
+          "wall_s": 0.724
+        },
+        {
+          "added_step_p50_ms": 163.54,
+          "concurrency": 16,
+          "episode": {
+            "max_ms": 1162.8106,
+            "mean_ms": 353.959,
+            "min_ms": 168.0954,
+            "n": 16,
+            "p50_ms": 246.8436,
+            "p95_ms": 1162.8106,
+            "p99_ms": 1162.8106
+          },
+          "episodes": 16,
+          "episodes_per_s": 13.659,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 0,
+          "step": {
+            "max_ms": 1120.9156,
+            "mean_ms": 314.5023,
+            "min_ms": 136.5463,
+            "n": 16,
+            "p50_ms": 205.98,
+            "p95_ms": 1120.9156,
+            "p99_ms": 1120.9156
+          },
+          "steps_per_s": 13.659,
+          "throughput_vs_best_local": 0.6177,
+          "wall_s": 1.171
+        },
+        {
+          "added_step_p50_ms": 10.08,
+          "bytes_per_call_from_node": 1217,
+          "bytes_per_call_to_node": 900,
+          "concurrency": 1,
+          "episode": {
+            "max_ms": 73.0503,
+            "mean_ms": 66.8447,
+            "min_ms": 64.1216,
+            "n": 16,
+            "p50_ms": 65.6834,
+            "p95_ms": 73.0503,
+            "p99_ms": 73.0503
+          },
+          "episodes": 16,
+          "episodes_per_s": 14.954,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 5,
+          "step": {
+            "max_ms": 58.8309,
+            "mean_ms": 53.3111,
+            "min_ms": 50.4004,
+            "n": 16,
+            "p50_ms": 52.5196,
+            "p95_ms": 58.8309,
+            "p99_ms": 58.8309
+          },
+          "steps_per_s": 14.954,
+          "throughput_vs_best_local": 0.6763,
+          "wall_s": 1.07
+        },
+        {
+          "added_step_p50_ms": 252.194,
+          "bytes_per_call_from_node": 1218,
+          "bytes_per_call_to_node": 900,
+          "concurrency": 16,
+          "episode": {
+            "max_ms": 406.7162,
+            "mean_ms": 359.6143,
+            "min_ms": 295.4019,
+            "n": 16,
+            "p50_ms": 349.2788,
+            "p95_ms": 406.7162,
+            "p99_ms": 406.7162
+          },
+          "episodes": 16,
+          "episodes_per_s": 38.241,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 5,
+          "step": {
+            "max_ms": 313.0806,
+            "mean_ms": 284.1293,
+            "min_ms": 214.6147,
+            "n": 16,
+            "p50_ms": 294.6332,
+            "p95_ms": 313.0806,
+            "p99_ms": 313.0806
+          },
+          "steps_per_s": 38.241,
+          "throughput_vs_best_local": 1.7294,
+          "wall_s": 0.418
+        },
+        {
+          "added_step_p50_ms": 40.432,
+          "bytes_per_call_from_node": 1217,
+          "bytes_per_call_to_node": 900,
+          "concurrency": 1,
+          "episode": {
+            "max_ms": 131.8563,
+            "mean_ms": 127.4933,
+            "min_ms": 125.9365,
+            "n": 16,
+            "p50_ms": 126.8454,
+            "p95_ms": 131.8563,
+            "p99_ms": 131.8563
+          },
+          "episodes": 16,
+          "episodes_per_s": 7.841,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 20,
+          "step": {
+            "max_ms": 87.9965,
+            "mean_ms": 83.478,
+            "min_ms": 81.9889,
+            "n": 16,
+            "p50_ms": 82.8719,
+            "p95_ms": 87.9965,
+            "p99_ms": 87.9965
+          },
+          "steps_per_s": 7.841,
+          "throughput_vs_best_local": 0.3546,
+          "wall_s": 2.04
+        },
+        {
+          "added_step_p50_ms": 195.886,
+          "bytes_per_call_from_node": 1217,
+          "bytes_per_call_to_node": 900,
+          "concurrency": 16,
+          "episode": {
+            "max_ms": 1248.9554,
+            "mean_ms": 423.0737,
+            "min_ms": 245.7688,
+            "n": 16,
+            "p50_ms": 311.7937,
+            "p95_ms": 1248.9554,
+            "p99_ms": 1248.9554
+          },
+          "episodes": 16,
+          "episodes_per_s": 12.722,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 20,
+          "step": {
+            "max_ms": 1162.9718,
+            "mean_ms": 346.9535,
+            "min_ms": 190.7562,
+            "n": 16,
+            "p50_ms": 238.3258,
+            "p95_ms": 1162.9718,
+            "p99_ms": 1162.9718
+          },
+          "steps_per_s": 12.722,
+          "throughput_vs_best_local": 0.5753,
+          "wall_s": 1.258
+        },
+        {
+          "added_step_p50_ms": 102.068,
+          "bytes_per_call_from_node": 1217,
+          "bytes_per_call_to_node": 900,
+          "concurrency": 1,
+          "episode": {
+            "max_ms": 262.1697,
+            "mean_ms": 250.0417,
+            "min_ms": 246.674,
+            "n": 16,
+            "p50_ms": 249.0084,
+            "p95_ms": 262.1697,
+            "p99_ms": 262.1697
+          },
+          "episodes": 16,
+          "episodes_per_s": 3.999,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 50,
+          "step": {
+            "max_ms": 158.0143,
+            "mean_ms": 145.4221,
+            "min_ms": 142.8812,
+            "n": 16,
+            "p50_ms": 144.5072,
+            "p95_ms": 158.0143,
+            "p99_ms": 158.0143
+          },
+          "steps_per_s": 3.999,
+          "throughput_vs_best_local": 0.1809,
+          "wall_s": 4.001
+        },
+        {
+          "added_step_p50_ms": 279.223,
+          "bytes_per_call_from_node": 1218,
+          "bytes_per_call_to_node": 900,
+          "concurrency": 16,
+          "episode": {
+            "max_ms": 481.2127,
+            "mean_ms": 438.6681,
+            "min_ms": 386.1928,
+            "n": 16,
+            "p50_ms": 436.3657,
+            "p95_ms": 481.2127,
+            "p99_ms": 481.2127
+          },
+          "episodes": 16,
+          "episodes_per_s": 32.701,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 50,
+          "step": {
+            "max_ms": 353.9629,
+            "mean_ms": 317.724,
+            "min_ms": 267.1765,
+            "n": 16,
+            "p50_ms": 321.6625,
+            "p95_ms": 353.9629,
+            "p99_ms": 353.9629
+          },
+          "steps_per_s": 32.701,
+          "throughput_vs_best_local": 1.4789,
+          "wall_s": 0.489
+        },
+        {
+          "added_step_p50_ms": 202.886,
+          "bytes_per_call_from_node": 1217,
+          "bytes_per_call_to_node": 900,
+          "concurrency": 1,
+          "episode": {
+            "max_ms": 453.1221,
+            "mean_ms": 450.3415,
+            "min_ms": 447.1714,
+            "n": 16,
+            "p50_ms": 450.29,
+            "p95_ms": 453.1221,
+            "p99_ms": 453.1221
+          },
+          "episodes": 16,
+          "episodes_per_s": 2.22,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 100,
+          "step": {
+            "max_ms": 247.4939,
+            "mean_ms": 245.0648,
+            "min_ms": 242.6949,
+            "n": 16,
+            "p50_ms": 245.326,
+            "p95_ms": 247.4939,
+            "p99_ms": 247.4939
+          },
+          "steps_per_s": 2.22,
+          "throughput_vs_best_local": 0.1004,
+          "wall_s": 7.206
+        },
+        {
+          "added_step_p50_ms": 447.915,
+          "bytes_per_call_from_node": 1218,
+          "bytes_per_call_to_node": 900,
+          "concurrency": 16,
+          "episode": {
+            "max_ms": 761.5622,
+            "mean_ms": 708.8401,
+            "min_ms": 662.2899,
+            "n": 16,
+            "p50_ms": 710.8737,
+            "p95_ms": 761.5622,
+            "p99_ms": 761.5622
+          },
+          "episodes": 16,
+          "episodes_per_s": 20.852,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 100,
+          "step": {
+            "max_ms": 544.4062,
+            "mean_ms": 490.7165,
+            "min_ms": 453.3679,
+            "n": 16,
+            "p50_ms": 490.3542,
+            "p95_ms": 544.4062,
+            "p99_ms": 544.4062
+          },
+          "steps_per_s": 20.852,
+          "throughput_vs_best_local": 0.943,
+          "wall_s": 0.767
+        },
+        {
+          "added_step_p50_ms": 402.39,
+          "bytes_per_call_from_node": 1217,
+          "bytes_per_call_to_node": 900,
+          "concurrency": 1,
+          "episode": {
+            "max_ms": 853.7562,
+            "mean_ms": 851.1732,
+            "min_ms": 848.2889,
+            "n": 16,
+            "p50_ms": 851.396,
+            "p95_ms": 853.7562,
+            "p99_ms": 853.7562
+          },
+          "episodes": 16,
+          "episodes_per_s": 1.175,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 200,
+          "step": {
+            "max_ms": 447.8099,
+            "mean_ms": 445.1997,
+            "min_ms": 443.6162,
+            "n": 16,
+            "p50_ms": 444.83,
+            "p95_ms": 447.8099,
+            "p99_ms": 447.8099
+          },
+          "steps_per_s": 1.175,
+          "throughput_vs_best_local": 0.0531,
+          "wall_s": 13.62
+        },
+        {
+          "added_step_p50_ms": 525.918,
+          "bytes_per_call_from_node": 1218,
+          "bytes_per_call_to_node": 900,
+          "concurrency": 16,
+          "episode": {
+            "max_ms": 1012.6505,
+            "mean_ms": 989.9323,
+            "min_ms": 965.5644,
+            "n": 16,
+            "p50_ms": 992.0438,
+            "p95_ms": 1012.6505,
+            "p99_ms": 1012.6505
+          },
+          "episodes": 16,
+          "episodes_per_s": 15.771,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 200,
+          "step": {
+            "max_ms": 598.1818,
+            "mean_ms": 569.4824,
+            "min_ms": 548.6533,
+            "n": 16,
+            "p50_ms": 568.3571,
+            "p95_ms": 598.1818,
+            "p99_ms": 598.1818
+          },
+          "steps_per_s": 15.771,
+          "throughput_vs_best_local": 0.7132,
+          "wall_s": 1.015
+        }
+      ],
+      "suite": "srp-env-code"
+    },
+    "web": {
+      "calls_per_episode": 4,
+      "conditions": [
+        {
+          "added_step_p50_ms": 0.0,
+          "concurrency": 1,
+          "episode": {
+            "max_ms": 13.0131,
+            "mean_ms": 9.8831,
+            "min_ms": 7.9957,
+            "n": 32,
+            "p50_ms": 9.7072,
+            "p95_ms": 11.9801,
+            "p99_ms": 13.0131
+          },
+          "episodes": 32,
+          "episodes_per_s": 101.056,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 0,
+          "step": {
+            "max_ms": 4.263,
+            "mean_ms": 2.6088,
+            "min_ms": 1.837,
+            "n": 96,
+            "p50_ms": 2.516,
+            "p95_ms": 3.4614,
+            "p99_ms": 4.263
+          },
+          "steps_per_s": 303.169,
+          "throughput_vs_best_local": 1.0,
+          "wall_s": 0.317
+        },
+        {
+          "added_step_p50_ms": 23.121,
+          "concurrency": 16,
+          "episode": {
+            "max_ms": 1161.7287,
+            "mean_ms": 367.2194,
+            "min_ms": 82.8908,
+            "n": 32,
+            "p50_ms": 105.4489,
+            "p95_ms": 1158.2553,
+            "p99_ms": 1161.7287
+          },
+          "episodes": 32,
+          "episodes_per_s": 27.321,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 0,
+          "step": {
+            "max_ms": 1074.8606,
+            "mean_ms": 102.1492,
+            "min_ms": 2.7682,
+            "n": 96,
+            "p50_ms": 25.6368,
+            "p95_ms": 1039.3776,
+            "p99_ms": 1074.8606
+          },
+          "steps_per_s": 81.962,
+          "throughput_vs_best_local": 0.2704,
+          "wall_s": 1.171
+        },
+        {
+          "added_step_p50_ms": 11.476,
+          "bytes_per_call_from_node": 1646,
+          "bytes_per_call_to_node": 756,
+          "concurrency": 1,
+          "episode": {
+            "max_ms": 60.6038,
+            "mean_ms": 55.6162,
+            "min_ms": 53.5333,
+            "n": 32,
+            "p50_ms": 55.4438,
+            "p95_ms": 57.6411,
+            "p99_ms": 60.6038
+          },
+          "episodes": 32,
+          "episodes_per_s": 17.975,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 5,
+          "step": {
+            "max_ms": 19.495,
+            "mean_ms": 14.0622,
+            "min_ms": 13.1957,
+            "n": 96,
+            "p50_ms": 13.9921,
+            "p95_ms": 14.9372,
+            "p99_ms": 19.495
+          },
+          "steps_per_s": 53.924,
+          "throughput_vs_best_local": 0.1779,
+          "wall_s": 1.78
+        },
+        {
+          "added_step_p50_ms": 78.121,
+          "bytes_per_call_from_node": 1646,
+          "bytes_per_call_to_node": 755,
+          "concurrency": 16,
+          "episode": {
+            "max_ms": 1265.1308,
+            "mean_ms": 477.1743,
+            "min_ms": 246.6299,
+            "n": 32,
+            "p50_ms": 330.5431,
+            "p95_ms": 1231.3508,
+            "p99_ms": 1265.1308
+          },
+          "episodes": 32,
+          "episodes_per_s": 20.052,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 5,
+          "step": {
+            "max_ms": 1057.3884,
+            "mean_ms": 103.6888,
+            "min_ms": 14.6051,
+            "n": 96,
+            "p50_ms": 80.6367,
+            "p95_ms": 106.6658,
+            "p99_ms": 1057.3884
+          },
+          "steps_per_s": 60.155,
+          "throughput_vs_best_local": 0.1984,
+          "wall_s": 1.596
+        },
+        {
+          "added_step_p50_ms": 42.191,
+          "bytes_per_call_from_node": 1646,
+          "bytes_per_call_to_node": 755,
+          "concurrency": 1,
+          "episode": {
+            "max_ms": 179.5319,
+            "mean_ms": 178.3352,
+            "min_ms": 176.9632,
+            "n": 32,
+            "p50_ms": 178.3923,
+            "p95_ms": 179.5014,
+            "p99_ms": 179.5319
+          },
+          "episodes": 32,
+          "episodes_per_s": 5.607,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 20,
+          "step": {
+            "max_ms": 45.6742,
+            "mean_ms": 44.7551,
+            "min_ms": 43.7282,
+            "n": 96,
+            "p50_ms": 44.7067,
+            "p95_ms": 45.4518,
+            "p99_ms": 45.6742
+          },
+          "steps_per_s": 16.821,
+          "throughput_vs_best_local": 0.0555,
+          "wall_s": 5.707
+        },
+        {
+          "added_step_p50_ms": 82.446,
+          "bytes_per_call_from_node": 1646,
+          "bytes_per_call_to_node": 756,
+          "concurrency": 16,
+          "episode": {
+            "max_ms": 1224.609,
+            "mean_ms": 355.2862,
+            "min_ms": 210.9859,
+            "n": 32,
+            "p50_ms": 330.5746,
+            "p95_ms": 381.7415,
+            "p99_ms": 1224.609
+          },
+          "episodes": 32,
+          "episodes_per_s": 25.892,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 20,
+          "step": {
+            "max_ms": 109.1401,
+            "mean_ms": 82.4089,
+            "min_ms": 44.5734,
+            "n": 96,
+            "p50_ms": 84.9616,
+            "p95_ms": 101.6799,
+            "p99_ms": 109.1401
+          },
+          "steps_per_s": 77.675,
+          "throughput_vs_best_local": 0.2562,
+          "wall_s": 1.236
+        },
+        {
+          "added_step_p50_ms": 102.514,
+          "bytes_per_call_from_node": 1646,
+          "bytes_per_call_to_node": 755,
+          "concurrency": 1,
+          "episode": {
+            "max_ms": 433.0679,
+            "mean_ms": 419.7198,
+            "min_ms": 416.5301,
+            "n": 32,
+            "p50_ms": 418.9108,
+            "p95_ms": 422.6619,
+            "p99_ms": 433.0679
+          },
+          "episodes": 32,
+          "episodes_per_s": 2.382,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 50,
+          "step": {
+            "max_ms": 118.4299,
+            "mean_ms": 105.1273,
+            "min_ms": 103.7116,
+            "n": 96,
+            "p50_ms": 105.0303,
+            "p95_ms": 106.0425,
+            "p99_ms": 118.4299
+          },
+          "steps_per_s": 7.147,
+          "throughput_vs_best_local": 0.0236,
+          "wall_s": 13.432
+        },
+        {
+          "added_step_p50_ms": 108.614,
+          "bytes_per_call_from_node": 1646,
+          "bytes_per_call_to_node": 755,
+          "concurrency": 16,
+          "episode": {
+            "max_ms": 481.1768,
+            "mean_ms": 449.9857,
+            "min_ms": 432.0908,
+            "n": 32,
+            "p50_ms": 443.3343,
+            "p95_ms": 479.8697,
+            "p99_ms": 481.1768
+          },
+          "episodes": 32,
+          "episodes_per_s": 34.387,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 50,
+          "step": {
+            "max_ms": 123.0824,
+            "mean_ms": 111.6233,
+            "min_ms": 105.2923,
+            "n": 96,
+            "p50_ms": 111.1304,
+            "p95_ms": 118.0781,
+            "p99_ms": 123.0824
+          },
+          "steps_per_s": 103.161,
+          "throughput_vs_best_local": 0.3403,
+          "wall_s": 0.931
+        },
+        {
+          "added_step_p50_ms": 202.922,
+          "bytes_per_call_from_node": 1646,
+          "bytes_per_call_to_node": 755,
+          "concurrency": 1,
+          "episode": {
+            "max_ms": 823.7335,
+            "mean_ms": 821.392,
+            "min_ms": 818.6875,
+            "n": 32,
+            "p50_ms": 821.3484,
+            "p95_ms": 823.4291,
+            "p99_ms": 823.7335
+          },
+          "episodes": 32,
+          "episodes_per_s": 1.217,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 100,
+          "step": {
+            "max_ms": 207.1475,
+            "mean_ms": 205.5483,
+            "min_ms": 204.2123,
+            "n": 96,
+            "p50_ms": 205.4378,
+            "p95_ms": 206.8979,
+            "p99_ms": 207.1475
+          },
+          "steps_per_s": 3.652,
+          "throughput_vs_best_local": 0.012,
+          "wall_s": 26.285
+        },
+        {
+          "added_step_p50_ms": 202.557,
+          "bytes_per_call_from_node": 1646,
+          "bytes_per_call_to_node": 755,
+          "concurrency": 16,
+          "episode": {
+            "max_ms": 855.4403,
+            "mean_ms": 828.0809,
+            "min_ms": 815.5759,
+            "n": 32,
+            "p50_ms": 819.7673,
+            "p95_ms": 854.265,
+            "p99_ms": 855.4403
+          },
+          "episodes": 32,
+          "episodes_per_s": 18.956,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 100,
+          "step": {
+            "max_ms": 214.0564,
+            "mean_ms": 205.9374,
+            "min_ms": 202.9517,
+            "n": 96,
+            "p50_ms": 205.0729,
+            "p95_ms": 210.9388,
+            "p99_ms": 214.0564
+          },
+          "steps_per_s": 56.869,
+          "throughput_vs_best_local": 0.1876,
+          "wall_s": 1.688
+        },
+        {
+          "added_step_p50_ms": 403.408,
+          "bytes_per_call_from_node": 1646,
+          "bytes_per_call_to_node": 755,
+          "concurrency": 1,
+          "episode": {
+            "max_ms": 1631.4689,
+            "mean_ms": 1623.5954,
+            "min_ms": 1619.8849,
+            "n": 32,
+            "p50_ms": 1622.864,
+            "p95_ms": 1629.3238,
+            "p99_ms": 1631.4689
+          },
+          "episodes": 32,
+          "episodes_per_s": 0.616,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 200,
+          "step": {
+            "max_ms": 415.06,
+            "mean_ms": 406.1297,
+            "min_ms": 404.2167,
+            "n": 96,
+            "p50_ms": 405.9241,
+            "p95_ms": 407.7875,
+            "p99_ms": 415.06
+          },
+          "steps_per_s": 1.848,
+          "throughput_vs_best_local": 0.0061,
+          "wall_s": 51.956
+        },
+        {
+          "added_step_p50_ms": 403.281,
+          "bytes_per_call_from_node": 1646,
+          "bytes_per_call_to_node": 755,
+          "concurrency": 16,
+          "episode": {
+            "max_ms": 1658.6396,
+            "mean_ms": 1631.5055,
+            "min_ms": 1619.6956,
+            "n": 32,
+            "p50_ms": 1626.2265,
+            "p95_ms": 1654.9637,
+            "p99_ms": 1658.6396
+          },
+          "episodes": 32,
+          "episodes_per_s": 9.722,
+          "error_count": 0,
+          "errors": [],
+          "rtt_ms": 200,
+          "step": {
+            "max_ms": 420.9101,
+            "mean_ms": 406.6572,
+            "min_ms": 402.9675,
+            "n": 96,
+            "p50_ms": 405.7969,
+            "p95_ms": 417.4548,
+            "p99_ms": 420.9101
+          },
+          "steps_per_s": 29.165,
+          "throughput_vs_best_local": 0.0962,
+          "wall_s": 3.292
+        }
+      ],
+      "suite": "srp-env-web"
+    }
+  }
+}

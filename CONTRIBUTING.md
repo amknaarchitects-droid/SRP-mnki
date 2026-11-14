@@ -33,13 +33,14 @@ Both must pass before you open a pull request. Some sandbox tests need Linux ker
 - `srp/envs/`: the simulated environment suites and the code sandbox.
 - `srp/settlement/`: settlement providers.
 - `srp/transport/`: the signed HTTP transport.
+- `benchmarks/`: reproducible measurements; analysed in `docs/ECONOMICS.md`.
 
 ## Rules
 
 - **Specs and code stay in sync.** If you change protocol behavior, update the matching file in `spec/` in the same pull request.
 - **Do not weaken a test to make it pass.** If behavior legitimately changes, update the test and say why.
 - **Security fixes need a test** that fails without the fix.
-- **No unmeasured claims.** Numbers in the README or docs must come from a reproducible benchmark or be labelled as estimates.
+- **No unmeasured claims.** Numbers in the README or docs must come from a reproducible benchmark (`python -m benchmarks`, see `benchmarks/`) or be labelled as estimates. If a change affects performance, rerun the benchmarks and commit the new `benchmarks/results/`.
 - Match the style of the surrounding code. Type hints on public functions.
 
 ## AI-assisted contributions

@@ -23,3 +23,6 @@ env/
 .vscode/
 .idea/
 *.swp
+
+# Benchmark smoke-run output (committed results live in benchmarks/results/)
+bench-smoke/
