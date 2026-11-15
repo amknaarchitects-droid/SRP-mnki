@@ -9,7 +9,7 @@
 
 **Status: alpha.** This is a specification and a reference implementation with simulated environments. See the [roadmap](ROADMAP.md) for what comes next.
 
-**Where SRP fits, honestly.** Our [economics and latency analysis](docs/ECONOMICS.md) finds that SRP does **not** beat renting datacenter RAM for paid capacity, and that it is a poor fit for tight environment loops over the internet: every call costs about two network round trips. Its credible use is **donated capacity** (for example open-science runs) for **latency-tolerant, multi-turn workloads**, where each turn involves seconds of model generation. The Copy-on-Write arena is useful on its own, inside or outside a datacenter.
+**Where SRP fits, honestly.** Our [economics and latency analysis](docs/ECONOMICS.md) finds that SRP does **not** beat renting datacenter RAM for paid capacity, and that it is a poor fit for tight environment loops over the internet: every call costs a network round trip, which dwarfs a sub-millisecond environment step. Its credible use is **donated capacity** (for example open-science runs) for **latency-tolerant, multi-turn workloads**, where each turn involves seconds of model generation. The Copy-on-Write arena is useful on its own, inside or outside a datacenter.
 
 Created and maintained by **Shady Sharaf (mnki)**.
 
@@ -21,7 +21,7 @@ As frontier AI shifts toward **Reinforcement Learning with Verifiable Rewards (R
 
 * **Mostly Idle Memory (estimate):** During multi-turn RL rollouts (coding, formal math, web navigation, 3D CAD), each sandbox executes an action for a short time and then sits frozen in RAM waiting for the GPU cluster to generate the next reasoning token. We expect sandboxes to be idle for the large majority of a rollout; this has not been measured yet.
 * **The Container RAM Wall (worked example):** 100,000 isolated containers at 500 MB–2 GB each would need 50 TB to 200 TB of system RAM. The container count and sizes are illustrative assumptions, not figures from a specific training run. Copy-on-Write sharing shrinks this figure in a datacenter just as much as on contributor machines.
-* **Zero Disk Wear by Design:** Unlike traditional distributed compute networks that thrash contributor SSDs, SRP keeps all environment state **in volatile RAM (`VolatileRAMArena`)** using **4 KB page-granular Copy-on-Write (CoW)** snapshots. Forked branches share the immutable base pages and allocate only the pages they change, with **zero bytes written to disk**. Measured at the OS level, 64 branches forked from a 64 MB snapshot, each writing 16 KB, used **97% less memory** than 64 full copies ([benchmark](benchmarks/results/RESULTS.md)). A single pinned snapshot currently costs about 2.1× its size, a known overhead listed in the [analysis](docs/ECONOMICS.md#23-memory-saved-by-copy-on-write).
+* **Zero Disk Wear by Design:** Unlike traditional distributed compute networks that thrash contributor SSDs, SRP keeps all environment state **in volatile RAM (`VolatileRAMArena`)** using **4 KB page-granular Copy-on-Write (CoW)** snapshots. Forked branches share the immutable base pages and allocate only the pages they change, with **zero bytes written to disk**. Measured at the OS level, 64 branches forked from a 64 MB snapshot, each writing 16 KB, used **98% less memory** than 64 full copies ([benchmark](benchmarks/results/RESULTS.md)). A pinned snapshot itself costs about 1.15× its size in process memory ([analysis](docs/ECONOMICS.md#23-memory-saved-by-copy-on-write)).
 
 ---
 
@@ -111,7 +111,7 @@ SRP is a public good with **0% protocol fees** and is completely agnostic to how
 | **RAM residency** | Chained (pointer-chasing) challenges over time-memory-hard, node-unique ballast, with the RTT baseline subtracted. Only proven ballast bytes earn lease. |
 | **Agent code** | Static policy, deterministic fuel, process isolation, an audit hook blocking every CPython audit event, address scrubbing, and hash-order-deterministic sets. The tests run in a separate namespace and the test file is hidden. On Linux, the sandbox also adds a network namespace, seccomp-BPF (x86_64 and aarch64), no-ASLR and rlimits. |
 | **Grading** | Pinned tests can use seeded property helpers (`srp_randint`, `srp_choice`, `srp_random`). The seed depends on a hidden salt and the submitted code, so visible examples cannot simply be hard-coded. |
-| **Transport** | `srp/transport`: Ed25519-signed commands (with timestamp and single-use nonce), signed responses, strict schema validation, deadlines, and optional TLS/mTLS (tested), with handshakes off the accept thread. |
+| **Transport** | `srp/transport`: Ed25519-signed commands (with timestamp and single-use nonce), signed responses, strict schema validation, deadlines, and optional TLS/mTLS (tested), with handshakes off the accept thread. Persistent connections; a retry re-sends the identical signed frame, so a command never runs twice. |
 | **Economics** | Stake with unbonding, slashing from unsettled balance and then stake, quarantine, and epoch-bound payout Merkle roots. |
 
 **Known limits:**

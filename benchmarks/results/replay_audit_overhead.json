@@ -1,10 +1,10 @@
 {
   "benchmark": "replay_audit_overhead",
-  "duration_s": 14.5,
+  "duration_s": 16.9,
   "environment": {
-    "commit": "1fd35e50f9bc",
+    "commit": "a5bef9bbef84",
     "cpu": "AMD Ryzen 5 5600H with Radeon Graphics",
-    "generated_utc": "2026-11-14T23:29:19Z",
+    "generated_utc": "2026-11-15T09:03:45Z",
     "implementation": "CPython",
     "logical_cpus": 12,
     "machine": "x86_64",
@@ -26,38 +26,38 @@
           "config": "baseline: no audits",
           "duplicated_work_ratio": 0.0,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 36.6162,
+          "ms_per_provider_step": 41.5335,
           "provider_steps": 30,
           "wall_overhead_percent": 0.0,
-          "wall_s": 1.0985
+          "wall_s": 1.246
         },
         {
           "audit_rate": 0.05,
           "audit_rewarded_steps": false,
-          "auditor_steps": 0,
+          "auditor_steps": 1,
           "audits_inconclusive": 0,
-          "audits_performed": 0,
+          "audits_performed": 1,
           "config": "rate 0.05, sampling only",
-          "duplicated_work_ratio": 0.0,
+          "duplicated_work_ratio": 0.0333,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 36.8585,
+          "ms_per_provider_step": 43.9684,
           "provider_steps": 30,
-          "wall_overhead_percent": 0.7,
-          "wall_s": 1.1058
+          "wall_overhead_percent": 5.9,
+          "wall_s": 1.3191
         },
         {
           "audit_rate": 0.25,
           "audit_rewarded_steps": false,
-          "auditor_steps": 6,
+          "auditor_steps": 8,
           "audits_inconclusive": 0,
-          "audits_performed": 6,
+          "audits_performed": 8,
           "config": "rate 0.25, sampling only",
-          "duplicated_work_ratio": 0.2,
+          "duplicated_work_ratio": 0.2667,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 44.0144,
+          "ms_per_provider_step": 51.5495,
           "provider_steps": 30,
-          "wall_overhead_percent": 20.2,
-          "wall_s": 1.3204
+          "wall_overhead_percent": 24.1,
+          "wall_s": 1.5465
         },
         {
           "audit_rate": 0.0,
@@ -68,10 +68,10 @@
           "config": "rate 0, plus every rewarded step",
           "duplicated_work_ratio": 1.0,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 72.9756,
+          "ms_per_provider_step": 80.9058,
           "provider_steps": 30,
-          "wall_overhead_percent": 99.3,
-          "wall_s": 2.1893
+          "wall_overhead_percent": 94.8,
+          "wall_s": 2.4272
         },
         {
           "audit_rate": 0.05,
@@ -82,10 +82,10 @@
           "config": "rate 0.05, plus every rewarded step (default)",
           "duplicated_work_ratio": 1.0,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 72.649,
+          "ms_per_provider_step": 96.0255,
           "provider_steps": 30,
-          "wall_overhead_percent": 98.4,
-          "wall_s": 2.1795
+          "wall_overhead_percent": 131.2,
+          "wall_s": 2.8808
         },
         {
           "audit_rate": 1.0,
@@ -96,10 +96,10 @@
           "config": "rate 1.0 (audit everything)",
           "duplicated_work_ratio": 1.0,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 73.1987,
+          "ms_per_provider_step": 87.1165,
           "provider_steps": 30,
-          "wall_overhead_percent": 99.9,
-          "wall_s": 2.196
+          "wall_overhead_percent": 109.8,
+          "wall_s": 2.6135
         }
       ],
       "steps_per_episode": 1,
@@ -117,38 +117,38 @@
           "config": "baseline: no audits",
           "duplicated_work_ratio": 0.0,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 0.3963,
+          "ms_per_provider_step": 0.4362,
           "provider_steps": 600,
           "wall_overhead_percent": 0.0,
-          "wall_s": 0.2378
+          "wall_s": 0.2617
         },
         {
           "audit_rate": 0.05,
           "audit_rewarded_steps": false,
-          "auditor_steps": 38,
+          "auditor_steps": 30,
           "audits_inconclusive": 0,
-          "audits_performed": 36,
+          "audits_performed": 30,
           "config": "rate 0.05, sampling only",
-          "duplicated_work_ratio": 0.0633,
+          "duplicated_work_ratio": 0.05,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 0.4151,
+          "ms_per_provider_step": 0.4441,
           "provider_steps": 600,
-          "wall_overhead_percent": 4.8,
-          "wall_s": 0.2491
+          "wall_overhead_percent": 1.8,
+          "wall_s": 0.2664
         },
         {
           "audit_rate": 0.25,
           "audit_rewarded_steps": false,
-          "auditor_steps": 151,
+          "auditor_steps": 159,
           "audits_inconclusive": 0,
-          "audits_performed": 151,
+          "audits_performed": 158,
           "config": "rate 0.25, sampling only",
-          "duplicated_work_ratio": 0.2517,
+          "duplicated_work_ratio": 0.265,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 0.4617,
+          "ms_per_provider_step": 0.5082,
           "provider_steps": 600,
           "wall_overhead_percent": 16.5,
-          "wall_s": 0.277
+          "wall_s": 0.3049
         },
         {
           "audit_rate": 0.0,
@@ -159,10 +159,10 @@
           "config": "rate 0, plus every rewarded step",
           "duplicated_work_ratio": 1.0,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 0.6623,
+          "ms_per_provider_step": 0.7179,
           "provider_steps": 600,
-          "wall_overhead_percent": 67.1,
-          "wall_s": 0.3974
+          "wall_overhead_percent": 64.6,
+          "wall_s": 0.4307
         },
         {
           "audit_rate": 0.05,
@@ -173,10 +173,10 @@
           "config": "rate 0.05, plus every rewarded step (default)",
           "duplicated_work_ratio": 1.0,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 0.6608,
+          "ms_per_provider_step": 0.7095,
           "provider_steps": 600,
-          "wall_overhead_percent": 66.7,
-          "wall_s": 0.3965
+          "wall_overhead_percent": 62.7,
+          "wall_s": 0.4257
         },
         {
           "audit_rate": 1.0,
@@ -187,10 +187,10 @@
           "config": "rate 1.0 (audit everything)",
           "duplicated_work_ratio": 1.0,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 0.6779,
+          "ms_per_provider_step": 0.7065,
           "provider_steps": 600,
-          "wall_overhead_percent": 71.0,
-          "wall_s": 0.4067
+          "wall_overhead_percent": 62.0,
+          "wall_s": 0.4239
         }
       ],
       "steps_per_episode": 2,
@@ -208,38 +208,38 @@
           "config": "baseline: no audits",
           "duplicated_work_ratio": 0.0,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 0.3377,
+          "ms_per_provider_step": 0.356,
           "provider_steps": 900,
           "wall_overhead_percent": 0.0,
-          "wall_s": 0.3039
+          "wall_s": 0.3204
         },
         {
           "audit_rate": 0.05,
           "audit_rewarded_steps": false,
-          "auditor_steps": 54,
+          "auditor_steps": 42,
           "audits_inconclusive": 0,
-          "audits_performed": 52,
+          "audits_performed": 40,
           "config": "rate 0.05, sampling only",
-          "duplicated_work_ratio": 0.06,
+          "duplicated_work_ratio": 0.0467,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 0.335,
+          "ms_per_provider_step": 0.3754,
           "provider_steps": 900,
-          "wall_overhead_percent": -0.8,
-          "wall_s": 0.3015
+          "wall_overhead_percent": 5.5,
+          "wall_s": 0.3379
         },
         {
           "audit_rate": 0.25,
           "audit_rewarded_steps": false,
-          "auditor_steps": 249,
+          "auditor_steps": 224,
           "audits_inconclusive": 0,
-          "audits_performed": 247,
+          "audits_performed": 218,
           "config": "rate 0.25, sampling only",
-          "duplicated_work_ratio": 0.2767,
+          "duplicated_work_ratio": 0.2489,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 0.3805,
+          "ms_per_provider_step": 0.4396,
           "provider_steps": 900,
-          "wall_overhead_percent": 12.7,
-          "wall_s": 0.3425
+          "wall_overhead_percent": 23.5,
+          "wall_s": 0.3956
         },
         {
           "audit_rate": 0.0,
@@ -250,10 +250,10 @@
           "config": "rate 0, plus every rewarded step",
           "duplicated_work_ratio": 1.0,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 0.5198,
+          "ms_per_provider_step": 0.6396,
           "provider_steps": 900,
-          "wall_overhead_percent": 53.9,
-          "wall_s": 0.4678
+          "wall_overhead_percent": 79.7,
+          "wall_s": 0.5757
         },
         {
           "audit_rate": 0.05,
@@ -264,10 +264,10 @@
           "config": "rate 0.05, plus every rewarded step (default)",
           "duplicated_work_ratio": 1.0,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 0.5226,
+          "ms_per_provider_step": 0.6275,
           "provider_steps": 900,
-          "wall_overhead_percent": 54.8,
-          "wall_s": 0.4704
+          "wall_overhead_percent": 76.2,
+          "wall_s": 0.5647
         },
         {
           "audit_rate": 1.0,
@@ -278,10 +278,10 @@
           "config": "rate 1.0 (audit everything)",
           "duplicated_work_ratio": 1.0,
           "fraud_proofs": 0,
-          "ms_per_provider_step": 0.5422,
+          "ms_per_provider_step": 0.5729,
           "provider_steps": 900,
-          "wall_overhead_percent": 60.6,
-          "wall_s": 0.488
+          "wall_overhead_percent": 60.9,
+          "wall_s": 0.5156
         }
       ],
       "steps_per_episode": 3,
