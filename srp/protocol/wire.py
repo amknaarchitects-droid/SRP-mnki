@@ -14,7 +14,7 @@ Decoding is strict and never raises anything but `WireError`:
 
 Frame shape:
     {"jsonrpc": "2.0", "id": "<id>", "method": "SRP_STEP",
-     "params": {"srp_version": "0.5.0", "body": {...dataclass fields...}}}
+     "params": {"srp_version": "0.7.0", "body": {...dataclass fields...}}}
 """
 
 from __future__ import annotations

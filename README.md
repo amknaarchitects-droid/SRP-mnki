@@ -1,7 +1,7 @@
 # Share RAM Protocol (SRP)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Protocol Version](https://img.shields.io/badge/SRP-v0.5.0-brightgreen.svg)](spec/SRP-001-wire-protocol.md)
+[![Protocol Version](https://img.shields.io/badge/SRP-v0.7.0-brightgreen.svg)](spec/SRP-001-wire-protocol.md)
 [![Protocol Fee](https://img.shields.io/badge/Protocol_Fee-0%25-orange.svg)](spec/SRP-004-settlement-api.md)
 [![Status](https://img.shields.io/badge/Status-Alpha-red.svg)](ROADMAP.md)
 
@@ -100,7 +100,7 @@ SRP is a public good with **0% protocol fees** and is completely agnostic to how
 
 ---
 
-## Security Model (v0.5.0)
+## Security Model (v0.7.0)
 
 | Layer | What it guarantees |
 |---|---|
@@ -166,7 +166,8 @@ SRP was developed with AI coding assistance (Anthropic's Claude and Google's Gem
 
 ## Roadmap and Contributing
 
-* [ROADMAP.md](ROADMAP.md): what is planned, and what v0.5 is not.
+* [ROADMAP.md](ROADMAP.md): what is planned, and what SRP is not (yet).
+* [CHANGELOG.md](CHANGELOG.md): what changed in each release.
 * [CONTRIBUTING.md](CONTRIBUTING.md): setup, rules and how to report security issues.
 * [docs/SECURITY-REVIEW.md](docs/SECURITY-REVIEW.md): scope, threat model, where each security claim lives in the code, and known limits.
 

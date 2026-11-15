@@ -1,6 +1,6 @@
 # SRP-001: Wire Protocol Specification
 
-**Status:** Draft Standard (v0.5.0)  
+**Status:** Draft Standard (v0.7.0)  
 **Category:** Core Protocol  
 **License:** MIT / Public Domain (CC0)
 
@@ -27,7 +27,7 @@ Every message is a UTF-8 JSON-RPC 2.0 frame (reference codec: `srp/protocol/wire
 
 ```json
 {"jsonrpc": "2.0", "id": "7f3c…", "method": "SRP_STEP",
- "params": {"srp_version": "0.5.0", "body": { … message fields … }}}
+ "params": {"srp_version": "0.7.0", "body": { … message fields … }}}
 ```
 
 Receivers MUST reject frames with an unknown `method`, a different `srp_version`, unknown body fields, non-finite numbers (`NaN`, `Infinity`), or a size above 16 MiB. Binary MessagePack/Protobuf encodings with identical field names are permitted; optional `zstd` compression applies to page blobs only.
@@ -45,7 +45,7 @@ Receivers MUST reject frames with an unknown `method`, a different `srp_version`
   "ram_arena_capacity_mb": 16384,
   "supported_runtimes": ["wasm_cow", "container_tmpfs"],
   "supported_suites": ["srp-env-code", "srp-env-math", "srp-env-web", "srp-env-spatial"],
-  "protocol_version": "0.5.0",
+  "protocol_version": "0.7.0",
   "runtime_profile": "cpython-3.12-siphash13-linux-x86_64",
   "sandbox_isolation": {"kernel_network_isolation": true, "seccomp": true, "network_namespace": true}
 }

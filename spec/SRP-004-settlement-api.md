@@ -1,6 +1,6 @@
 # SRP-004: General Economic & Settlement Interface Specification
 
-**Status:** Draft Standard (v0.5.0)  
+**Status:** Draft Standard (v0.7.0)  
 **Category:** Economics & Incentives  
 **License:** MIT / Public Domain (CC0)
 

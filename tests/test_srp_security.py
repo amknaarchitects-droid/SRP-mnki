@@ -26,7 +26,7 @@ from srp.node.ram_arena import PAGE_SIZE, VolatileRAMArena
 from srp.protocol import crypto
 from srp.protocol.messages import ActionPayload, FraudProof, MemoryPingResponse, SnapshotManifest
 from srp.protocol.residency import BallastCheckpoints, answer_chain
-from srp.protocol.wire import WireError, decode_message, encode_message
+from srp.protocol.wire import PROTOCOL_VERSION, WireError, decode_message, encode_message
 from srp.settlement.base import FiatAndApiCreditLedger, TokenEscrowLedger, payout_leaf
 
 IS_LINUX = platform.system() == "Linux"
@@ -580,7 +580,8 @@ def test_wire_codec_roundtrip_preserves_signed_receipts():
     ],
 )
 def test_wire_codec_rejects_malformed_frames(body):
-    frame = '{"jsonrpc":"2.0","id":"1","method":"SRP_FORK","params":{"srp_version":"0.5.0","body":%s}}' % body
+    frame = ('{"jsonrpc":"2.0","id":"1","method":"SRP_FORK","params":{"srp_version":"%s","body":%s}}'
+             % (PROTOCOL_VERSION, body))  # current version, so only the body can be at fault
     with pytest.raises(WireError):
         decode_message(frame)
     with pytest.raises(WireError):

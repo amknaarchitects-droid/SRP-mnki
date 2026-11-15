@@ -5,8 +5,8 @@ SRP is maintained by one person. The order below is the order of work; there are
 | Version | Status | Scope |
 |---|---|---|
 | **v0.5** | Released (alpha) | Four specs, reference implementation, four simulated environment suites, end-to-end demo, test suite. |
-| **v0.6** | Work done; not yet released (package and protocol still report 0.5.0) | Reproducible benchmarks (`python -m benchmarks`), a written verdict in [docs/ECONOMICS.md](docs/ECONOMICS.md), and the five fixes below, re-measured. |
-| **v0.7** | Work done; not yet released | Security hardening: property-based tests for wire-message validation, a sandbox escape-attempt suite (which found and closed two holes, see below), `bandit` and `pip-audit` in CI, and a [security review guide](docs/SECURITY-REVIEW.md). |
+| **v0.6** | Released in v0.7.0 (alpha) | Reproducible benchmarks (`python -m benchmarks`), a written verdict in [docs/ECONOMICS.md](docs/ECONOMICS.md), and the five fixes below, re-measured. |
+| **v0.7** | Released as v0.7.0 (alpha) | Security hardening: property-based tests for wire-message validation, a sandbox escape-attempt suite (which found and closed two holes, see below), `bandit` and `pip-audit` in CI, and a [security review guide](docs/SECURITY-REVIEW.md). |
 | **v1.0** | Later | Community security review complete and its findings addressed. Permissionless testnet. |
 
 ## v0.6 fixes found by the benchmarks

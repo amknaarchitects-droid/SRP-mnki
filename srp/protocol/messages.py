@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from srp.protocol.crypto import NodeKeypair, verify_signature
 
 # Single source of truth for the wire/protocol version (wire, coordinator, nodes).
-PROTOCOL_VERSION = "0.5.0"
+PROTOCOL_VERSION = "0.7.0"
 
 _MACHINE_ALIASES = {"amd64": "x86_64", "x64": "x86_64", "arm64": "aarch64"}
 
