@@ -119,7 +119,7 @@ SRP is a public good with **0% protocol fees** and is completely agnostic to how
 - Determinism is guaranteed only within a runtime profile.
 - Property tests only help if snapshot authors write them.
 
-The protocol is **alpha**: get an external security review before running it permissionlessly. [SRP-003 §5](spec/SRP-003-proof-of-ram.md) lists these residual risks.
+The protocol is **alpha**: get an external security review before running it permissionlessly; [docs/SECURITY-REVIEW.md](docs/SECURITY-REVIEW.md) is the starting point. [SRP-003 §5](spec/SRP-003-proof-of-ram.md) lists these residual risks.
 
 ### Multi-host deployment
 ```python
@@ -147,7 +147,7 @@ coord.register_node(RemoteNode("https://host:8443/srp/v1", coord.keypair, node_i
 pytest -v
 ```
 
-Some sandbox tests need Linux kernel features and are skipped on other systems. CI runs the suite, the demo and a benchmark smoke run on Linux and Windows.
+Some sandbox tests need Linux kernel features and are skipped on other systems. CI runs the suite, the demo and a benchmark smoke run on Linux and Windows, plus `bandit` and `pip-audit`.
 
 ## Benchmarks
 
@@ -168,6 +168,7 @@ SRP was developed with AI coding assistance (Anthropic's Claude and Google's Gem
 
 * [ROADMAP.md](ROADMAP.md): what is planned, and what v0.5 is not.
 * [CONTRIBUTING.md](CONTRIBUTING.md): setup, rules and how to report security issues.
+* [docs/SECURITY-REVIEW.md](docs/SECURITY-REVIEW.md): scope, threat model, where each security claim lives in the code, and known limits.
 
 ---
 

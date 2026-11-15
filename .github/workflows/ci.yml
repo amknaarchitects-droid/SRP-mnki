@@ -35,3 +35,21 @@ jobs:
         run: python -m srp.cli demo
       - name: Benchmark smoke run
         run: python -m benchmarks --quick --out bench-smoke
+
+  security:
+    name: Security checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[crypto,dev,bench]" bandit pip-audit
+      - name: Static analysis (bandit, medium severity and above)
+        run: python -m bandit -r srp -ll
+      - name: Known vulnerabilities in dependencies (pip-audit)
+        run: python -m pip_audit --skip-editable
