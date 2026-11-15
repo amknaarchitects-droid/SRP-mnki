@@ -53,6 +53,24 @@ def test_remote_node_reuses_one_connection_for_sequential_calls():
         server.stop()
 
 
+def test_keepalive_calls_do_not_wait_for_delayed_acks():
+    # With keep-alive, Nagle's algorithm on the server held each response until
+    # the client's delayed ACK: ~40 ms per call on Linux loopback (Windows
+    # loopback does not show it). A call should take a few milliseconds.
+    coord, node, server, _ = _served_node("nagle1")
+    try:
+        remote = RemoteNode(server.url, coord.keypair, node_id=node.node_id)
+        times = []
+        for _ in range(21):
+            t0 = time.perf_counter()
+            remote.telemetry()
+            times.append(time.perf_counter() - t0)
+        times.sort()
+        assert times[len(times) // 2] < 0.02
+    finally:
+        server.stop()
+
+
 def test_end_to_end_episode_over_keepalive_connections():
     coord, node, server, accepted = _served_node("keepalive2")
     try:

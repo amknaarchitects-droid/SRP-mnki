@@ -161,6 +161,9 @@ class NodeServer:
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
             timeout = connection_timeout_s  # applied to the socket in setup()
+            # On a kept-alive connection a small response must not wait for the
+            # peer's delayed ACK (Nagle): that costs ~40 ms per call on Linux.
+            disable_nagle_algorithm = True
 
             def setup(self) -> None:
                 super().setup()  # sets the socket timeout first
