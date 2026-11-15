@@ -45,6 +45,7 @@ import json
 import os
 import platform
 import secrets
+import string
 import subprocess
 import sys
 from typing import Any, Dict, List, Optional
@@ -84,6 +85,13 @@ FORBIDDEN_ATTRS = frozenset(
 )
 
 
+try:  # CPython's helper behind string.Formatter.get_field
+    from _string import formatter_field_name_split as _formatter_field_name_split
+except ImportError:  # pragma: no cover - non-CPython
+    def _formatter_field_name_split(field: str):  # type: ignore[misc]
+        raise ValueError("format strings with fields need CPython")
+
+
 class SandboxPolicyError(PermissionError):
     """Raised when code violates the static sandbox policy."""
 
@@ -93,6 +101,26 @@ def _check_attr_name(name: str, what: str = "attribute") -> None:
         raise SandboxPolicyError(f"Private/dunder {what} '{name}' is blocked")
     if name in FORBIDDEN_ATTRS:
         raise SandboxPolicyError(f"Introspection {what} '{name}' is blocked")
+
+
+def _check_format_string(fmt: str) -> None:
+    """Field names in a literal format string may only read public, permitted attributes."""
+    try:
+        parsed = list(string.Formatter().parse(fmt))
+    except ValueError as exc:
+        raise SandboxPolicyError(f"Malformed format string: {exc}") from exc
+    for _, field, spec, _ in parsed:
+        if field:
+            try:
+                _, rest = _formatter_field_name_split(field)
+                parts = list(rest)
+            except ValueError as exc:
+                raise SandboxPolicyError(f"Malformed format field: {exc}") from exc
+            for is_attr, name in parts:
+                if is_attr:
+                    _check_attr_name(str(name), "format-string attribute")
+        if spec:
+            _check_format_string(spec)
 
 
 def validate_code(code: str) -> ast.Module:
@@ -134,8 +162,20 @@ def validate_code(code: str) -> ast.Module:
             raise SandboxPolicyError(f"Dunder name '{node.id}' is blocked in sandbox")
         if isinstance(node, ast.Attribute):
             _check_attr_name(node.attr)
-            if node.attr in ("format", "format_map") and id(node) not in called:
-                raise SandboxPolicyError(f"'.{node.attr}' may only be called directly")
+            # No attribute assignment or deletion: the replacement `str`, `set`
+            # and `frozenset` classes and the metered builtins are shared with
+            # the pinned tests, so `str.isdigit = ...` in a solution would
+            # change what the tests see.
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                raise SandboxPolicyError(f"Assigning or deleting attribute '{node.attr}' is blocked")
+            if node.attr in ("format", "format_map"):
+                if id(node) not in called:
+                    raise SandboxPolicyError(f"'.{node.attr}' may only be called directly")
+                # Format fields read attributes at run time ('{0.attr}'), so the
+                # format string must be a literal whose fields can be checked here.
+                if not (isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)):
+                    raise SandboxPolicyError(f"'.{node.attr}' may only be called on a string literal")
+                _check_format_string(node.value.value)
         # Structural pattern matching reads attributes by name (`case C(attr=x)`)
         # and binds names, bypassing the Attribute/Name checks above.
         if isinstance(node, ast.MatchClass):
