@@ -6,9 +6,10 @@ For each audit configuration the same episodes are run and two things are measur
   duplicated work   auditor steps executed / provider steps executed
   wall-clock cost   total time relative to the unaudited baseline
 
-The coordinator always audits rewarded, terminal and timed-out steps unless
-`audit_rewarded_steps=False`, so the effective audit fraction depends on the
-workload, not only on `audit_rate`. Canaries are off to isolate replay audits.
+Besides sampling a fraction `audit_rate` of all steps, the coordinator audits
+each rewarded or terminal step with probability `rewarded_audit_rate` (default
+1.0), so the effective audit fraction depends on the workload, not only on
+`audit_rate`. Auditing an episode's last step replays the whole episode. Canaries are off to isolate replay audits.
 The auditor here runs in the coordinator's own process, on the same hardware.
 """
 
@@ -24,14 +25,16 @@ from srp.node.daemon import SRPProviderNode
 
 NAME = "replay_audit_overhead"
 
-# (label, audit_rate, audit_rewarded_steps)
-CONFIGS: List[Tuple[str, float, bool]] = [
-    ("baseline: no audits", 0.0, False),
-    ("rate 0.05, sampling only", 0.05, False),
-    ("rate 0.25, sampling only", 0.25, False),
-    ("rate 0, plus every rewarded step", 0.0, True),
-    ("rate 0.05, plus every rewarded step (default)", 0.05, True),
-    ("rate 1.0 (audit everything)", 1.0, True),
+# (label, audit_rate, rewarded_audit_rate)
+CONFIGS: List[Tuple[str, float, float]] = [
+    ("baseline: no audits", 0.0, 0.0),
+    ("rate 0.05, sampling only", 0.05, 0.0),
+    ("rate 0.25, sampling only", 0.25, 0.0),
+    ("rate 0.05, plus 10% of rewarded steps", 0.05, 0.1),
+    ("rate 0.05, plus 25% of rewarded steps", 0.05, 0.25),
+    ("rate 0, plus every rewarded step", 0.0, 1.0),
+    ("rate 0.05, plus every rewarded step (default)", 0.05, 1.0),
+    ("rate 1.0 (audit everything)", 1.0, 1.0),
 ]
 
 
@@ -44,7 +47,7 @@ def run(quick: bool = False) -> Dict[str, Any]:
         manifest, actions = manifests[key], common.EPISODES[key]
         rows: List[Dict[str, Any]] = []
         for label, rate, rewarded in CONFIGS:
-            coord = SRPCoordinator(canary_rate=0.0, audit_rate=rate, audit_rewarded_steps=rewarded)
+            coord = SRPCoordinator(canary_rate=0.0, audit_rate=rate, rewarded_audit_rate=rewarded)
             node = SRPProviderNode(node_id=f"audit_{key}", ram_capacity_mb=512)
             coord.register_node(node)
             coord.broadcast_snapshot(manifest)
@@ -61,7 +64,7 @@ def run(quick: bool = False) -> Dict[str, Any]:
             rows.append({
                 "config": label,
                 "audit_rate": rate,
-                "audit_rewarded_steps": rewarded,
+                "rewarded_audit_rate": rewarded,
                 "provider_steps": useful,
                 "auditor_steps": audited,
                 "duplicated_work_ratio": round(audited / useful, 4) if useful else None,

@@ -138,7 +138,8 @@ def run_demo() -> None:
     print("=" * 78)
 
     # Initialize Coordinator with TokenEscrowLedger (or Fiat/Karma)
-    ledger = TokenEscrowLedger(token_symbol="SRP_USDC", rate_per_gb_hour=0.05, rate_per_step=0.002)
+    # Example rates calibrated to datacenter RAM prices (docs/ECONOMICS.md §4.2)
+    ledger = TokenEscrowLedger(token_symbol="SRP_USDC")
     coordinator = SRPCoordinator(settlement_provider=ledger)
 
     # Register 2 Contributor RAM Nodes

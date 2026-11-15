@@ -108,6 +108,22 @@ class SettlementProvider(Protocol):
     def summary(self) -> Dict[str, object]: ...
 
 
+# Example rates for the USD/stablecoin reference ledgers, calibrated in
+# docs/ECONOMICS.md (section 4.2). They are examples, not recommendations:
+#   * RAM: datacenter RAM costs about $0.0036-0.0083 per GiB-hour (2026-11
+#     list prices). For contributor capacity plus auditor overhead to stay
+#     below that, the contributor rate must sit under (1 - audit share) x the
+#     datacenter price; $0.002/GB-hour stays under it at up to ~40% audit
+#     duplication even against spot prices.
+#   * Steps: a datacenter vCPU costs about $0.03-0.07 per hour, so $1 per
+#     million steps pays for roughly 50 ms of vCPU time per step.
+#   * Dirty pages: 1 MB held for an hour is worth well under one micro-dollar,
+#     below the ledger's 6-decimal resolution, so it is not priced separately.
+EXAMPLE_RATE_PER_GB_HOUR = 0.002
+EXAMPLE_RATE_PER_STEP = 0.000001
+EXAMPLE_RATE_PER_DIRTY_MB = 0.0
+
+
 class BaseConfigurableLedger:
     """
     Base metering engine implementing the SRP-004 dual-component formula:
@@ -350,14 +366,16 @@ class FiatAndApiCreditLedger(BaseConfigurableLedger):
     def __init__(
         self,
         unit_symbol: str = "USD_CREDITS",
-        rate_per_gb_hour: float = 0.04,
-        rate_per_step: float = 0.0005,
+        rate_per_gb_hour: float = EXAMPLE_RATE_PER_GB_HOUR,
+        rate_per_step: float = EXAMPLE_RATE_PER_STEP,
         slash_penalty_units: float = 10.0,
+        rate_per_dirty_mb: float = EXAMPLE_RATE_PER_DIRTY_MB,
     ) -> None:
         super().__init__(
             unit_symbol=unit_symbol,
             rate_per_gb_hour=rate_per_gb_hour,
             rate_per_step=rate_per_step,
+            rate_per_dirty_mb=rate_per_dirty_mb,
             slash_penalty_units=slash_penalty_units,
         )
 
@@ -373,14 +391,16 @@ class TokenEscrowLedger(BaseConfigurableLedger):
     def __init__(
         self,
         token_symbol: str = "SRP_USDC",
-        rate_per_gb_hour: float = 0.05,
-        rate_per_step: float = 0.001,
+        rate_per_gb_hour: float = EXAMPLE_RATE_PER_GB_HOUR,
+        rate_per_step: float = EXAMPLE_RATE_PER_STEP,
         slash_penalty_units: float = 10.0,
+        rate_per_dirty_mb: float = EXAMPLE_RATE_PER_DIRTY_MB,
     ) -> None:
         super().__init__(
             unit_symbol=token_symbol,
             rate_per_gb_hour=rate_per_gb_hour,
             rate_per_step=rate_per_step,
+            rate_per_dirty_mb=rate_per_dirty_mb,
             slash_penalty_units=slash_penalty_units,
         )
 

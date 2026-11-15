@@ -5,6 +5,8 @@ Regression tests for the v0.6 fixes the benchmarks pointed to
 1. Persistent HTTP connections in the transport.
 2. A larger listen queue in NodeServer.
 3. Pinned snapshots no longer retain the manifest (a second copy of every byte).
+4. Rewarded / terminal steps can be audited at a sampled rate (`rewarded_audit_rate`).
+5. Example settlement rates calibrated to datacenter RAM prices.
 
 Each test except the controls failed before its fix.
 """
@@ -195,3 +197,121 @@ def test_pinned_snapshot_does_not_retain_the_manifest():
     branch = node.fork("pin_release", count=1)[0][0]
     assert branch.read_file("a.txt") == "x" * 50_000
     assert branch.read_file("b.txt") == "y" * 9_000
+
+
+# ---------------------------------------------------------------- fix 4
+# Sampled audits of rewarded / terminal steps (SRP-003 §2.2, `rewarded_audit_rate`).
+from srp.protocol.messages import ActionPayload  # noqa: E402
+from srp.settlement.base import (  # noqa: E402
+    EXAMPLE_RATE_PER_GB_HOUR,
+    EXAMPLE_RATE_PER_STEP,
+    FiatAndApiCreditLedger,
+    TokenEscrowLedger,
+)
+
+_RW = ActionPayload("apply_tactic", {"tactic": "rw [Nat.add_assoc]"})
+_OMEGA = ActionPayload("apply_tactic", {"tactic": "omega"})
+
+
+class _Draw:
+    """Stand-in for the coordinator's CSPRNG: every draw returns `value`."""
+
+    def __init__(self, value: float) -> None:
+        self.value = value
+
+    def random(self) -> float:
+        return self.value
+
+
+def _math_cluster(**kw):
+    ledger = FiatAndApiCreditLedger()
+    coord = SRPCoordinator(settlement_provider=ledger, canary_rate=0.0, audit_rate=0.0, **kw)
+    node = SRPProviderNode(node_id="a1", ram_capacity_mb=64)
+    ledger.deposit_stake("a1", 50.0)
+    coord.register_node(node)
+    m = build_default_manifests()["math"]
+    coord.broadcast_snapshot(m)
+    return coord, node, ledger, m
+
+
+def _rewarded_episode(coord, m):
+    bid = coord.fork(m.snapshot_id)[0][0]
+    coord.step(bid, _RW)  # rewarded 0.1
+    return coord.step(bid, _OMEGA)  # rewarded 1.0, terminal
+
+
+def _lie_on_final_reward(node):
+    honest = node.step
+
+    def step(branch_id, action, request_id=None, timeout_ms=5000):
+        res = honest(branch_id, action, request_id=request_id, timeout_ms=timeout_ms)
+        if res.receipt.step_index == 2:
+            res.reward = res.receipt.reward = 0.5
+            res.receipt.sign(node._keypair)
+        return res
+
+    node.step = step
+
+
+def test_default_still_audits_every_rewarded_step():  # control: the default is unchanged
+    coord, _, _, m = _math_cluster()
+    assert coord.rewarded_audit_rate == 1.0
+    _rewarded_episode(coord, m)
+    assert coord.audits_performed == 2
+
+
+def test_rewarded_audit_rate_zero_skips_rewarded_audits():
+    coord, _, _, m = _math_cluster(rewarded_audit_rate=0.0)
+    _rewarded_episode(coord, m)
+    assert coord.audits_performed == 0
+
+
+def test_rewarded_steps_are_sampled_with_the_coordinator_csprng():
+    coord, _, _, m = _math_cluster(rewarded_audit_rate=0.25)
+    coord._rng = _Draw(0.9)  # above the rate: not audited
+    _rewarded_episode(coord, m)
+    assert coord.audits_performed == 0
+    coord._rng = _Draw(0.1)  # below the rate: audited
+    _rewarded_episode(coord, m)
+    assert coord.audits_performed == 2
+
+
+def test_a_sampled_reward_lie_is_caught_and_slashed():
+    coord, node, ledger, m = _math_cluster(rewarded_audit_rate=0.1)
+    _lie_on_final_reward(node)
+    coord._rng = _Draw(0.05)
+    with pytest.raises(PermissionError):
+        _rewarded_episode(coord, m)
+    assert coord.is_quarantined("a1") and ledger.stake_of("a1") < 50.0
+
+
+def test_an_unsampled_reward_lie_passes_this_is_the_trade_off():
+    # Documents the cost of sampling: a lie on an unaudited final step is not
+    # re-checked later, because the episode has ended (SRP-003 §5).
+    coord, node, _, m = _math_cluster(rewarded_audit_rate=0.1)
+    _lie_on_final_reward(node)
+    coord._rng = _Draw(0.5)
+    assert _rewarded_episode(coord, m).reward == 0.5
+    assert not coord.is_quarantined("a1")
+
+
+def test_rewarded_audit_rate_is_validated_and_reported():
+    with pytest.raises(ValueError):
+        SRPCoordinator(rewarded_audit_rate=1.5)
+    coord = SRPCoordinator(audit_rewarded_steps=False, rewarded_audit_rate=0.5)
+    assert coord.rewarded_audit_rate == 0.0  # the older switch still turns it off
+    tel = SRPCoordinator(rewarded_audit_rate=0.2).cluster_telemetry()
+    assert tel["rewarded_audit_rate"] == 0.2
+
+
+# ---------------------------------------------------------------- fix 5
+def test_example_ledger_rates_sit_below_datacenter_ram_prices():
+    spot_usd_per_gib_hour = 0.0036  # cheapest datacenter figure in docs/ECONOMICS.md §3.1
+    for ledger in (FiatAndApiCreditLedger(), TokenEscrowLedger()):
+        assert ledger.rate_per_gb_hour == EXAMPLE_RATE_PER_GB_HOUR
+        assert ledger.rate_per_step == EXAMPLE_RATE_PER_STEP
+        # Even with a quarter of the work duplicated by audits, renting from a
+        # contributor at this rate must still undercut the datacenter.
+        assert ledger.rate_per_gb_hour < (1 - 0.25) * spot_usd_per_gib_hour
+        # A step must not be priced above ~50 ms of a $0.07/h datacenter vCPU.
+        assert ledger.rate_per_step <= 0.07 / 3600 * 0.05 * 1.1

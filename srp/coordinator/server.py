@@ -332,6 +332,7 @@ class SRPCoordinator:
         canary_rate: float = 0.05,
         audit_rate: Optional[float] = None,
         audit_rewarded_steps: bool = True,
+        rewarded_audit_rate: float = 1.0,
         audit_confirm_runs: int = 2,
         audit_cache_size: int = 256,
         min_stake_units: float = 0.0,
@@ -354,7 +355,8 @@ class SRPCoordinator:
         keypair: Optional[NodeKeypair] = None,
         state_path: Optional[str] = None,
     ) -> None:
-        for name, rate in (("canary_rate", canary_rate), ("audit_rate", audit_rate)):
+        for name, rate in (("canary_rate", canary_rate), ("audit_rate", audit_rate),
+                           ("rewarded_audit_rate", rewarded_audit_rate)):
             if rate is not None and not 0.0 <= rate <= 1.0:
                 raise ValueError(f"{name} must be within [0, 1]")
         _check_timeout(step_timeout_ms, "step_timeout_ms")
@@ -363,6 +365,10 @@ class SRPCoordinator:
         self.canary_rate = canary_rate
         self.audit_rate = canary_rate if audit_rate is None else audit_rate
         self.audit_rewarded_steps = audit_rewarded_steps
+        # Probability that a rewarded or terminal step is audited (SRP-003 §2.2).
+        # 1.0 audits every one, which replays every rewarded episode in full;
+        # lower values trade detection speed for auditor cost.
+        self.rewarded_audit_rate = float(rewarded_audit_rate) if audit_rewarded_steps else 0.0
         self.audit_confirm_runs = max(1, int(audit_confirm_runs))
         self.min_stake_units = min_stake_units
         self.ballast_ratio = max(0.0, ballast_ratio)
@@ -900,7 +906,8 @@ class SRPCoordinator:
         timed_out = _timed_out(result)
         verdict: Dict[str, Any] = {"status": "skipped"}
         must_audit = force_audit or timed_out or (
-            self.audit_rewarded_steps and (result.reward != 0.0 or result.terminated)
+            (result.reward != 0.0 or result.terminated) and self.rewarded_audit_rate > 0.0
+            and (self.rewarded_audit_rate >= 1.0 or self._rng.random() < self.rewarded_audit_rate)
         )
         if allow_audit and manifest is not None and (
             must_audit or (self.audit_rate > 0 and self._rng.random() < self.audit_rate)
@@ -1356,6 +1363,8 @@ class SRPCoordinator:
             "cluster_cow_savings_percent": round(savings, 2),
             "memory_pings_verified": self.memory_pings_verified,
             "replay_audits_performed": self.audits_performed,
+            "audit_rate": self.audit_rate,
+            "rewarded_audit_rate": self.rewarded_audit_rate,
             "replay_audits_inconclusive": self.audits_inconclusive,
             "replay_audit_errors": self.audit_errors,
             "last_audit_error": self.last_audit_error,

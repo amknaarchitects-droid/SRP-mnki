@@ -160,7 +160,9 @@ def test_all_four_flagship_verifier_suites_end_to_end():
 
 def test_proof_of_honest_ram_and_canary_slashing():
     """Verify MemoryPingChallenge and Canary Fraud Proof slashing."""
-    ledger = FiatAndApiCreditLedger(rate_per_gb_hour=1.0, rate_per_step=0.5)
+    # Explicit dirty-page rate: the example ledgers no longer price dirty MB
+    # separately (v0.6), but this test checks that a step earns both parts.
+    ledger = FiatAndApiCreditLedger(rate_per_gb_hour=1.0, rate_per_step=0.5, rate_per_dirty_mb=0.001)
     coordinator = SRPCoordinator(settlement_provider=ledger)
     node = SRPProviderNode(node_id="node_honest", ram_capacity_mb=64)
     coordinator.register_node(node)
