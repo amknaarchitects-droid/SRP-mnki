@@ -68,7 +68,9 @@ class PinnedSnapshot:
         ordered_page_hashes: List[str],
         state_hash: str,
     ) -> None:
-        self.manifest = manifest
+        # The manifest itself is deliberately not retained: its file contents are
+        # already held as content-addressed pages, and keeping the manifest
+        # would hold a second copy of every byte for the life of the pin.
         self.snapshot_id = manifest.snapshot_id
         self.suite = manifest.suite
         self.runtime = manifest.runtime

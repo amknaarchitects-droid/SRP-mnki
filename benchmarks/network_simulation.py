@@ -6,10 +6,12 @@ Topology (all real TCP sockets on loopback, no mocks):
     SRPCoordinator -> RemoteNode --TCP--> DelayProxy --TCP--> NodeServer -> SRPProviderNode
 
 The proxy is a delay line: every chunk is forwarded `rtt/2` after it arrived, in
-each direction, optionally through a bandwidth cap. Because SRP's HTTP transport
-opens a new TCP connection for every command, the proxy also holds each new
-connection for one extra round trip to stand in for the TCP handshake. TLS is not
-used here; a TLS handshake would add one or two further round trips per command.
+each direction, optionally through a bandwidth cap. The proxy also holds each new
+TCP connection for one extra round trip to stand in for the TCP handshake. SRP's
+HTTP transport keeps connections alive, so that handshake is paid once per pooled
+connection rather than once per command; the number of connections opened is
+reported. TLS is not used here; a TLS handshake would add one or two further round
+trips per new connection.
 
 An episode is one SRP_FORK followed by the suite's steps, all through the proxy.
 Each condition is run sequentially and with concurrent episodes, because waiting
@@ -212,7 +214,8 @@ def run(quick: bool = False, bandwidth_mbit: Optional[float] = None) -> Dict[str
                                       max(episodes[key], conc), conc)
                 cond["rtt_ms"] = rtt
                 if proxy and before:
-                    calls = max(1, proxy.connections - before[2])
+                    calls = max(1, cond["episodes"] * (1 + len(actions)))
+                    cond["connections_opened"] = proxy.connections - before[2]
                     cond["bytes_per_call_to_node"] = round((proxy.bytes_to_node - before[0]) / calls)
                     cond["bytes_per_call_from_node"] = round((proxy.bytes_from_node - before[1]) / calls)
                 conditions.append(cond)
@@ -237,7 +240,8 @@ def run(quick: bool = False, bandwidth_mbit: Optional[float] = None) -> Dict[str
         "benchmark": NAME,
         "quick": quick,
         "bandwidth_mbit": bandwidth_mbit,
-        "handshake_round_trips_per_call": 1.0,
+        "handshake_round_trips_per_connection": 1.0,
+        "persistent_connections": True,
         "tls": False,
         "workloads": workloads,
     }

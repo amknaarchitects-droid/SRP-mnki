@@ -19,21 +19,27 @@ Security properties:
     server context requires client certificates).
   * Deadlines: client calls time out (`timeout_s`), so a slow or hung node
     cannot stall the coordinator indefinitely.
+  * Persistent connections: `RemoteNode` keeps a small pool of HTTP/1.1
+    keep-alive connections, so a call costs one network round trip instead of
+    two (TCP handshake + request). A request is only ever re-sent byte for byte
+    (same nonce), so a retry can never execute a command twice: if the first
+    attempt did reach the node, the node rejects the copy as a replay.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import http.client
 import json
 import secrets
+import socket
 import ssl
 import threading
 import time
-import urllib.error
-import urllib.request
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from srp.envs.sandbox import backstop_ms
 from srp.node.daemon import SRPProviderNode
@@ -51,7 +57,10 @@ from srp.protocol.wire import MAX_FRAME_BYTES, WireError, decode_body, loads_str
 
 RPC_PATH = "/srp/v1"
 MAX_CLOCK_SKEW_S = 60.0
-CONNECTION_TIMEOUT_S = 30.0  # per-connection socket timeout (slow clients / stalled TLS)
+CONNECTION_TIMEOUT_S = 30.0  # per-connection socket timeout (slow clients / stalled TLS / idle keep-alive)
+LISTEN_BACKLOG = 128  # socketserver's default of 5 drops SYNs under concurrent load (~1 s retransmit stalls)
+CLIENT_IDLE_REUSE_S = 10.0  # pooled connections idle longer than this are discarded, well below the server's idle timeout
+CLIENT_POOL_SIZE = 32  # idle connections kept per RemoteNode
 _ALLOWED_ERRORS = {
     "KeyError": KeyError, "PermissionError": PermissionError, "MemoryError": MemoryError,
     "ValueError": ValueError, "RuntimeError": RuntimeError, "WireError": WireError,
@@ -94,15 +103,36 @@ class _TLSThreadingHTTPServer(ThreadingHTTPServer):
     ClientHello would stall every other request.
     """
 
+    request_queue_size = LISTEN_BACKLOG
+
     def __init__(self, addr, handler, ssl_context: Optional[ssl.SSLContext]) -> None:
         self.ssl_context = ssl_context
+        self._open: Set[socket.socket] = set()
+        self._open_lock = threading.Lock()
         super().__init__(addr, handler)
 
     def get_request(self):
         sock, addr = super().get_request()
         if self.ssl_context is not None:
             sock = self.ssl_context.wrap_socket(sock, server_side=True, do_handshake_on_connect=False)
+        with self._open_lock:
+            self._open.add(sock)
         return sock, addr
+
+    def shutdown_request(self, request) -> None:
+        with self._open_lock:
+            self._open.discard(request)
+        super().shutdown_request(request)
+
+    def close_open_connections(self) -> None:
+        """Drop keep-alive connections so a stopped server stops serving."""
+        with self._open_lock:
+            socks, self._open = list(self._open), set()
+        for sock in socks:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
 
     def handle_error(self, request, client_address) -> None:  # failed handshakes are routine
         pass
@@ -146,6 +176,11 @@ class NodeServer:
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(raw)))
+                if status != 200:
+                    # Rejected frames may leave an unread body on the socket;
+                    # never reuse such a connection.
+                    self.send_header("Connection", "close")
+                    self.close_connection = True
                 self.end_headers()
                 self.wfile.write(raw)
 
@@ -167,6 +202,7 @@ class NodeServer:
     def stop(self) -> None:
         self._httpd.shutdown()
         self._httpd.server_close()
+        self._httpd.close_open_connections()
 
     # ---------------------------------------------------------------- serving
     def _signed(self, req_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -301,6 +337,8 @@ class RemoteNode:
         timeout_s: float = 30.0,
         ssl_context: Optional[ssl.SSLContext] = None,
     ) -> None:
+        self._pool: List[Tuple[http.client.HTTPConnection, float]] = []
+        self._pool_lock = threading.Lock()
         self.url = url
         self.node_id = node_id
         self._kp = coordinator_keypair
@@ -316,6 +354,92 @@ class RemoteNode:
         self.public_key_hex = caps.public_key_hex
 
     # ------------------------------------------------------------- plumbing
+    @property
+    def url(self) -> str:
+        return self._url
+
+    @url.setter
+    def url(self, value: str) -> None:
+        parsed = urllib.parse.urlsplit(value)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ValueError(f"Unsupported node URL: {value!r}")
+        self._url = value
+        self._https = parsed.scheme == "https"
+        self._host = parsed.hostname
+        self._port = parsed.port
+        self._path = parsed.path or "/"
+        self.close()  # pooled connections point at the old address
+
+    def close(self) -> None:
+        """Close all pooled connections. The node stays usable; new calls reconnect."""
+        with self._pool_lock:
+            pool, self._pool = self._pool, []
+        for conn, _ in pool:
+            conn.close()
+
+    def _connect(self, timeout_s: float) -> http.client.HTTPConnection:
+        if self._https:
+            return http.client.HTTPSConnection(self._host, self._port, timeout=timeout_s, context=self._ssl)
+        return http.client.HTTPConnection(self._host, self._port, timeout=timeout_s)
+
+    def _checkout(self) -> Optional[http.client.HTTPConnection]:
+        now = time.monotonic()
+        stale: List[http.client.HTTPConnection] = []
+        found: Optional[http.client.HTTPConnection] = None
+        with self._pool_lock:
+            while self._pool:
+                conn, last_used = self._pool.pop()
+                if now - last_used <= CLIENT_IDLE_REUSE_S:
+                    found = conn
+                    break
+                stale.append(conn)
+        for conn in stale:
+            conn.close()
+        return found
+
+    def _checkin(self, conn: http.client.HTTPConnection) -> None:
+        with self._pool_lock:
+            same_target = conn.host == self._host and conn.port == (self._port or conn.default_port)
+            if same_target and len(self._pool) < CLIENT_POOL_SIZE:
+                self._pool.append((conn, time.monotonic()))
+                return
+        conn.close()
+
+    def _post(self, data: bytes, timeout_s: float) -> Tuple[int, bytes]:
+        """POST one frame, reusing a pooled keep-alive connection when possible."""
+        conn = self._checkout()
+        reused = conn is not None
+        while True:
+            if conn is None:
+                conn, reused = self._connect(timeout_s), False
+            elif conn.sock is not None:
+                conn.sock.settimeout(timeout_s)
+            try:
+                conn.request("POST", self._path, body=data, headers={"Content-Type": "application/json"})
+                resp = conn.getresponse()
+                raw = resp.read(MAX_FRAME_BYTES + 1)  # never buffer an unbounded body
+            except (http.client.RemoteDisconnected, ConnectionResetError,
+                    ConnectionAbortedError, BrokenPipeError):
+                conn.close()
+                if reused:
+                    # The node closed an idle pooled connection. Re-send the
+                    # identical frame (same nonce) on a fresh connection: if the
+                    # first copy was processed after all, the node answers 409.
+                    conn = None
+                    continue
+                raise
+            except BaseException:
+                conn.close()
+                raise
+            break
+        if len(raw) > MAX_FRAME_BYTES or resp.will_close or not resp.isclosed():
+            conn.close()
+        else:
+            self._checkin(conn)
+        if len(raw) > MAX_FRAME_BYTES:
+            raise WireError("Response exceeds MAX_FRAME_BYTES")
+        return resp.status, raw
+
     def _call(self, method: str, params: Dict[str, Any], timeout_s: Optional[float] = None) -> Any:
         req_id = secrets.token_hex(12)
         ts, nonce = time.time(), secrets.token_hex(16)
@@ -325,15 +449,10 @@ class RemoteNode:
                      "sig": self._kp.sign(_command_message(self.node_id, method, params, req_id, ts, nonce))},
         }
         data = json.dumps(frame, allow_nan=False).encode("utf-8")
-        req = urllib.request.Request(self.url, data=data, headers={"Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=timeout_s or self.timeout_s, context=self._ssl) as resp:
-                raw = resp.read(MAX_FRAME_BYTES + 1)  # never buffer an unbounded body
-                if len(raw) > MAX_FRAME_BYTES:
-                    raise WireError("Response exceeds MAX_FRAME_BYTES")
-                body = loads_strict(raw)
-        except urllib.error.HTTPError as exc:
-            raise PermissionError(f"Node rejected command ({exc.code})") from exc
+        status, raw = self._post(data, timeout_s or self.timeout_s)
+        if status != 200:
+            raise PermissionError(f"Node rejected command ({status})")
+        body = loads_strict(raw)
         if not isinstance(body, dict) or body.get("id") != req_id:
             raise WireError("Response does not match request")
         payload = {k: body[k] for k in ("result", "error") if k in body}
