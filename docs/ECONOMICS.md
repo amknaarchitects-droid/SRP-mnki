@@ -18,7 +18,7 @@ All measurements come from `python -m benchmarks` (full run). Raw data and the s
 
 | | |
 |---|---|
-| Library commit | `a5bef9bbef84` (v0.5 figures: `1fd35e50f9bc`) |
+| Library commit | `a0d242e` (v0.5 figures: `1fd35e50f9bc`) |
 | Machine | AMD Ryzen 5 5600H laptop, 12 logical CPUs |
 | OS | Linux 6.18 under WSL2 (3.5 GB RAM given to the VM) |
 | Python | CPython 3.14.4, `cryptography` installed |
@@ -31,12 +31,12 @@ Time per environment step with audits and canaries off ([`env_step_latency.json`
 
 | Suite | Node step p50 | Node step p99 | Through coordinator p50 |
 |---|---:|---:|---:|
-| `srp-env-math` (tactic checker) | 0.18 ms | 0.36 ms | 0.38 ms |
-| `srp-env-web` (DOM state machine) | 0.15 ms | 0.31 ms | 0.36 ms |
-| `srp-env-spatial` (CAD verifier) | 0.28 ms | 0.43 ms | 0.53 ms |
+| `srp-env-math` (tactic checker) | 0.18 ms | 0.41 ms | 0.39 ms |
+| `srp-env-web` (DOM state machine) | 0.18 ms | 0.38 ms | 0.40 ms |
+| `srp-env-spatial` (CAD verifier) | 0.28 ms | 0.51 ms | 0.47 ms |
 | `srp-env-code` (sandboxed tests) | 40–80 ms | 100–550 ms | 35–45 ms |
 
-Forking a branch takes 0.05–0.17 ms. Three of the four suites take well under a millisecond per step. The code suite is slower because each step starts an isolated sandbox process, and it varies a lot between runs (the ranges cover three full runs).
+Forking a branch takes 0.05–0.17 ms. Three of the four suites take well under a millisecond per step. The code suite is slower because each step starts an isolated sandbox process, and it varies a lot between runs (its ranges cover four full runs).
 
 ### 2.2 Network cost
 
@@ -46,20 +46,22 @@ The coordinator talks to a real `NodeServer` over TCP through a delay proxy that
 
 | RTT | Step p50 | Steps/s | vs. local | v0.5 step p50 | v0.5 vs. local |
 |---:|---:|---:|---:|---:|---:|
-| 0 ms (loopback) | 1.7 ms | 407 | 100% | 2.5 ms | 100% |
-| 5 ms | 7.5 ms | 101 | 25% | 14 ms | 18% |
-| 20 ms | 23 ms | 33 | 8.1% | 45 ms | 5.5% |
-| 50 ms | 53 ms | 14 | 3.5% | 105 ms | 2.4% |
-| 100 ms | 103 ms | 7.2 | 1.8% | 205 ms | 1.2% |
-| 200 ms | 203 ms | 3.6 | 0.9% | 406 ms | 0.6% |
+| 0 ms (loopback) | 1.6 ms | 496 | 100% | 2.5 ms | 100% |
+| 5 ms | 7.3 ms | 101 | 20% | 14 ms | 18% |
+| 20 ms | 23 ms | 32 | 6.5% | 45 ms | 5.5% |
+| 50 ms | 53 ms | 14 | 2.8% | 105 ms | 2.4% |
+| 100 ms | 103 ms | 7.2 | 1.5% | 205 ms | 1.2% |
+| 200 ms | 203 ms | 3.6 | 0.7% | 406 ms | 0.6% |
+
+The "vs. local" column divides by the fastest local run, which itself got faster (303 to 496 steps/s), so it understates the gain; compare steps/s at each RTT, which roughly doubled.
 
 Findings:
 
 - **Every call now costs one round trip.** Added latency is 1.0 × RTT at every setting (v0.5: 2.0–2.1 × RTT). The transport keeps connections open, so the TCP handshake is paid once per connection: a sequential run of 112 calls used one connection, and 16 concurrent episodes used 15.
-- **Halving latency did not change the picture for tight loops.** A sub-millisecond step is still dominated by the network: at 20 ms RTT one episode at a time runs at 8% of local throughput instead of 5.5%.
-- **The transport itself costs about 1.5 ms per call** at 0 ms RTT, versus 0.35 ms in-process: signing, verifying and JSON.
-- **Concurrency recovers throughput, not latency.** With 16 episodes in flight, throughput at 50 ms RTT rose from 14 to 184 steps/s, but each step still took 55 ms.
-- **No more stalls under concurrent load.** In v0.5, 16 concurrent episodes with no added latency pushed p95 step time to about 1 second, because the server's listen queue (Python's default of 5) overflowed. With a backlog of 128 and pooled connections, p95 is 46 ms. One code-suite condition (5 ms RTT, 16 concurrent) still had an unexplained p50 of about 1 s in the final run; it did not appear in the earlier runs and looks like CPU contention from 16 sandbox processes on the 12-thread laptop, but it has not been investigated.
+- **Halving latency did not change the picture for tight loops.** A sub-millisecond step is still dominated by the network: at 20 ms RTT one episode at a time runs at 32 steps/s instead of 17, against about 500 steps/s locally.
+- **The transport itself costs about 1.2 ms per call** at 0 ms RTT, versus 0.35 ms in-process: signing, verifying and JSON.
+- **Concurrency recovers throughput, not latency.** With 16 episodes in flight, throughput at 50 ms RTT rose from 14 to 162 steps/s, but each step still took 60 ms.
+- **No more stalls under concurrent load.** In v0.5, 16 concurrent episodes with no added latency pushed p95 step time to about 1 second, because the server's listen queue (Python's default of 5) overflowed. With a backlog of 128 and pooled connections, p95 is 53 ms. In one of three runs since the fix, one code-suite condition (5 ms RTT, 16 concurrent) had an unexplained p50 of about 1 s; it did not recur, and looks like CPU contention from 16 sandbox processes on the 12-thread laptop, but it has not been investigated.
 - **Bandwidth is not the bottleneck.** A step sends about 0.7–0.85 KB and receives 1.2–1.6 KB.
 
 One fix was itself found by these benchmarks: with connections kept open, Nagle's algorithm on the server held each small response for the client's delayed ACK, adding about 40 ms per call on Linux. The server now disables it (`TCP_NODELAY`), and a regression test pins this.
@@ -73,7 +75,7 @@ A 64 MB snapshot made of distinct pages, with N branches that each write 16 KB, 
 | 1 | 64 MB | 64 MB | 73.5 MB | −15% |
 | 4 | 256 MB | 64 MB | 73.5 MB | 71% |
 | 16 | 1,024 MB | 64 MB | 73.5 MB | 93% |
-| 64 | 4,096 MB | 65 MB | 73.6 MB | 98% |
+| 64 | 4,096 MB | 65 MB | 73.5 MB | 98% |
 
 Findings:
 
@@ -88,14 +90,20 @@ The same episodes at different audit settings ([`replay_audit_overhead.json`](..
 | Audit setting | `web` duplicated | `web` wall-clock | `math` duplicated | `code` duplicated |
 |---|---:|---:|---:|---:|
 | No audits | 0% | +0% | 0% | 0% |
-| 5% sampling only | 5% | +6% | 5% | 3% |
-| 25% sampling only | 25% | +24% | 26% | 27% |
-| **Default** (5% + every rewarded step) | **100%** | **+76%** | **100%** | **100%** |
-| Audit everything | 100% | +61% | 100% | 100% |
+| 5% sampling only | 5% | +4% | 4% | 0% |
+| 25% sampling only | 27% | +14% | 23% | 23% |
+| 5% + **10%** of rewarded steps (`rewarded_audit_rate=0.1`) | 13% | +10% | 18% | 20% |
+| 5% + **25%** of rewarded steps (`rewarded_audit_rate=0.25`) | 30% | +19% | 28% | 23% |
+| **Default** (5% + every rewarded step) | **100%** | **+60%** | **100%** | **100%** |
+| Audit everything | 100% | +74% | 100% | 100% |
 
-Wall-clock overhead is noisy between runs (the default ranged from +52% to +76% for `web` across three runs); the duplicated-work column is exact.
+Wall-clock overhead is noisy between runs (the default ranged from +52% to +76% for `web` across four runs); the duplicated-work column is exact. `code` runs only 30 steps, so its sampled rows are coarse.
 
-Finding: **the default policy duplicates all the work on these workloads.** The coordinator always audits rewarded, terminal and timed-out steps, and audits are incremental, so auditing the last step of an episode replays the whole episode. Every bundled episode ends in a reward, so the default amounts to auditing everything. Sampling-only audits cost about what their rate says.
+Findings:
+
+- **The default policy duplicates all the work on these workloads.** Audits are incremental, so auditing the last step of an episode replays the whole episode, and every bundled episode ends in a reward. The default therefore amounts to auditing everything.
+- **Sampling rewarded steps cuts that in proportion.** Since v0.6, `rewarded_audit_rate` audits each rewarded or terminal step with a given probability. At 0.1, duplicated work fell from 100% to 13–20%; at 0.25, to 23–30%. The `math` episodes earn partial rewards on intermediate steps too, so they are sampled more than once per episode.
+- **The cost is verification strength, not just compute.** A node that fabricates rewards is caught after about `1 / rate` lies on average (10 at 0.1), each uncaught lie reaches the trainer, and a lie on an unaudited final step is never re-checked. SRP-003 §2.2 sets out when a lower rate is acceptable. The default stays at 1.0.
 
 ## 3. External inputs
 
@@ -154,11 +162,12 @@ p + a × c_dc < c_dc      →      p < (1 − a) × c_dc
 
 | Audit duplication `a` | Max contributor price, at c_dc = $0.0036 | at c_dc = $0.0083 |
 |---:|---:|---:|
-| 100% (v0.5 default on these workloads) | $0 | $0 |
-| 25% | $0.0027 | $0.0062 |
+| 100% (default `rewarded_audit_rate = 1.0`, on these workloads) | $0 | $0 |
+| 25% (about `rewarded_audit_rate = 0.25`) | $0.0027 | $0.0062 |
+| 20% (about `rewarded_audit_rate = 0.1`) | $0.0029 | $0.0066 |
 | 5% | $0.0034 | $0.0079 |
 
-This is a rough bound: audits duplicate compute rather than the full RAM-hours, so the true audit cost may be lower. Even so, it sets the scale. For comparison, **the demo ledger pays `0.05` per GB-hour, which is 6–18 times the entire datacenter price**. That rate is a placeholder, not a market price.
+This is a rough bound: audits duplicate compute rather than the full RAM-hours, so the true audit cost may be lower. Even so, it sets the scale. In v0.5 the demo ledger paid `0.05` per GB-hour, 6–18 times the entire datacenter price. Since v0.6 the USD and stablecoin reference ledgers default to example rates derived from this bound: **0.002 per GB-hour**, which undercuts the cheapest datacenter price above with up to about 40% audit duplication, and **0.000001 per step**, about 50 ms of a datacenter vCPU (`srp/settlement/base.py`, SRP-004 §4). They are examples, not market prices.
 
 ### 4.3 Snapshot distribution
 
@@ -168,8 +177,8 @@ A contributor has to download each snapshot before serving it. At 100 Mbit/s, a 
 
 **SRP loses:**
 
-- **Tight loops with sub-millisecond steps.** At 20 ms RTT, one episode at a time runs at 8% of local throughput; at 100 ms, 1.8%.
-- **Paid capacity at current prices.** A contributor would have to accept less than about $0.003–0.008 per GiB-hour, and less still once audits are counted. With the v0.5 default audit policy, which duplicates all work on rewarded episodes, there is no positive price at which it is cheaper.
+- **Tight loops with sub-millisecond steps.** At 20 ms RTT, one episode at a time runs at 6.5% of local throughput; at 100 ms, 1.5%.
+- **Paid capacity at current prices.** A contributor would have to accept less than about $0.003–0.008 per GiB-hour, and less still once audits are counted. With the default audit policy (`rewarded_audit_rate = 1.0`), which duplicates all work on rewarded episodes, there is no positive price at which it is cheaper; a sampled policy is needed for paid capacity to make sense at all.
 - **As an answer to the "RAM wall".** The 98% CoW saving measured here is available inside any datacenter too, so it shrinks the problem for everyone rather than favouring decentralization.
 - **Frequently changing snapshots on slow home links.**
 
@@ -181,17 +190,17 @@ A contributor has to download each snapshot before serving it. At 100 Mbit/s, a 
 
 ## 6. Verdict
 
-As implemented today, **SRP does not beat renting datacenter RAM for paid capacity**, and it is unsuitable for tight environment loops over the internet. Its credible use is **donated capacity for latency-tolerant, multi-turn workloads**, which is a much narrower claim than the README made before v0.6. The fixes below halved network latency and memory overhead; they did not change this verdict, because the remaining costs are the round trip itself and the audit policy.
+As implemented today, **SRP does not beat renting datacenter RAM for paid capacity**, and it is unsuitable for tight environment loops over the internet. Its credible use is **donated capacity for latency-tolerant, multi-turn workloads**, which is a much narrower claim than the README made before v0.6. The fixes below halved network latency and memory overhead, made the audit cost configurable, and brought the example rates under datacenter prices. They did not change the verdict. A sampled audit policy makes paid capacity possible on paper, at contributor rates of about $0.003 per GiB-hour or less, but only by accepting that some fabricated rewards reach the trainer before a cheater is caught. Whether contributors would supply RAM at such rates is untested.
 
 The CoW arena itself is useful regardless of decentralization: forking 64 branches from a 64 MB snapshot used 98% less memory than 64 copies.
 
-Fixes these measurements pointed to, in rough order of payoff:
+Fixes these measurements pointed to, in rough order of payoff (all five are done):
 
 1. **Persistent connections in the transport.** Done in v0.6: k went from 2 to 1.
 2. **A larger listen queue in `NodeServer`.** Done in v0.6: the 1-second stalls under concurrent load are gone.
 3. **Release snapshot file contents after pinning.** Done in v0.6: a pinned snapshot costs 1.15× its size instead of 2.1×.
-4. **An audit policy that does not replay every rewarded episode.** For example, sample rewarded episodes at a configurable rate. This is a security trade-off and needs a spec change in SRP-003.
-5. **Calibrate example settlement rates** to the datacenter price range above.
+4. **An audit policy that does not replay every rewarded episode.** Done in v0.6: `rewarded_audit_rate` (SRP-003 §2.2). The default stays at 1.0; 0.1 cuts duplicated work to 13–20%.
+5. **Calibrate example settlement rates.** Done in v0.6: 0.002 per GB-hour and 0.000001 per step (§4.2, SRP-004 §4).
 
 ## 7. Reproducing
 

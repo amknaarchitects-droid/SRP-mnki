@@ -1,10 +1,10 @@
 {
   "benchmark": "env_step_latency",
-  "duration_s": 8.8,
+  "duration_s": 6.6,
   "environment": {
-    "commit": "a5bef9bbef84",
+    "commit": "a0d242e483fb",
     "cpu": "AMD Ryzen 5 5600H with Radeon Graphics",
-    "generated_utc": "2026-11-15T09:03:45Z",
+    "generated_utc": "2026-11-15T09:54:26Z",
     "implementation": "CPython",
     "logical_cpus": 12,
     "machine": "x86_64",
@@ -16,128 +16,128 @@
   "suites": {
     "cad": {
       "coordinator_fork": {
-        "max_ms": 0.1096,
-        "mean_ms": 0.0586,
-        "min_ms": 0.0459,
+        "max_ms": 0.1563,
+        "mean_ms": 0.0535,
+        "min_ms": 0.0445,
         "n": 500,
-        "p50_ms": 0.0569,
-        "p95_ms": 0.0796,
-        "p99_ms": 0.0963
+        "p50_ms": 0.0495,
+        "p95_ms": 0.0746,
+        "p99_ms": 0.1012
       },
       "coordinator_step": {
-        "max_ms": 1.2773,
-        "mean_ms": 0.5442,
-        "min_ms": 0.4211,
+        "max_ms": 0.9393,
+        "mean_ms": 0.4964,
+        "min_ms": 0.4144,
         "n": 500,
-        "p50_ms": 0.5318,
-        "p95_ms": 0.6949,
-        "p99_ms": 0.814
+        "p50_ms": 0.4695,
+        "p95_ms": 0.7079,
+        "p99_ms": 0.8728
       },
       "final_reward": 1.0,
       "node_step": {
-        "max_ms": 1.0109,
-        "mean_ms": 0.2944,
-        "min_ms": 0.2231,
+        "max_ms": 1.2677,
+        "mean_ms": 0.2963,
+        "min_ms": 0.2273,
         "n": 500,
-        "p50_ms": 0.2798,
-        "p95_ms": 0.3681,
-        "p99_ms": 0.4294
+        "p50_ms": 0.2773,
+        "p95_ms": 0.3991,
+        "p99_ms": 0.5108
       },
       "steps_per_episode": 1,
       "suite": "srp-env-spatial"
     },
     "code": {
       "coordinator_fork": {
-        "max_ms": 0.52,
-        "mean_ms": 0.1806,
-        "min_ms": 0.139,
+        "max_ms": 0.3306,
+        "mean_ms": 0.1755,
+        "min_ms": 0.1404,
         "n": 40,
-        "p50_ms": 0.1653,
-        "p95_ms": 0.2276,
-        "p99_ms": 0.52
+        "p50_ms": 0.1606,
+        "p95_ms": 0.2924,
+        "p99_ms": 0.3306
       },
       "coordinator_step": {
-        "max_ms": 82.6013,
-        "mean_ms": 45.0063,
-        "min_ms": 36.0001,
+        "max_ms": 101.8148,
+        "mean_ms": 45.206,
+        "min_ms": 35.2583,
         "n": 40,
-        "p50_ms": 43.1995,
-        "p95_ms": 57.6081,
-        "p99_ms": 82.6013
+        "p50_ms": 39.9194,
+        "p95_ms": 74.6913,
+        "p99_ms": 101.8148
       },
       "final_reward": 1.0,
       "node_step": {
-        "max_ms": 548.4204,
-        "mean_ms": 124.4779,
-        "min_ms": 42.2213,
+        "max_ms": 546.5041,
+        "mean_ms": 65.0528,
+        "min_ms": 33.5532,
         "n": 40,
-        "p50_ms": 80.3597,
-        "p95_ms": 255.4061,
-        "p99_ms": 548.4204
+        "p50_ms": 43.1044,
+        "p95_ms": 120.155,
+        "p99_ms": 546.5041
       },
       "steps_per_episode": 1,
       "suite": "srp-env-code"
     },
     "math": {
       "coordinator_fork": {
-        "max_ms": 0.1978,
-        "mean_ms": 0.0997,
-        "min_ms": 0.0844,
+        "max_ms": 0.2529,
+        "mean_ms": 0.1022,
+        "min_ms": 0.084,
         "n": 500,
-        "p50_ms": 0.0952,
-        "p95_ms": 0.1298,
-        "p99_ms": 0.1669
+        "p50_ms": 0.0961,
+        "p95_ms": 0.1391,
+        "p99_ms": 0.1889
       },
       "coordinator_step": {
-        "max_ms": 1.0663,
-        "mean_ms": 0.394,
-        "min_ms": 0.2952,
+        "max_ms": 7.5527,
+        "mean_ms": 0.427,
+        "min_ms": 0.2961,
         "n": 1000,
-        "p50_ms": 0.382,
-        "p95_ms": 0.5073,
-        "p99_ms": 0.6736
+        "p50_ms": 0.3937,
+        "p95_ms": 0.5852,
+        "p99_ms": 0.8118
       },
       "final_reward": 1.0,
       "node_step": {
-        "max_ms": 0.5214,
-        "mean_ms": 0.2008,
-        "min_ms": 0.1384,
+        "max_ms": 2.4016,
+        "mean_ms": 0.1945,
+        "min_ms": 0.1385,
         "n": 1000,
-        "p50_ms": 0.1844,
-        "p95_ms": 0.3039,
-        "p99_ms": 0.3612
+        "p50_ms": 0.176,
+        "p95_ms": 0.2986,
+        "p99_ms": 0.407
       },
       "steps_per_episode": 2,
       "suite": "srp-env-math"
     },
     "web": {
       "coordinator_fork": {
-        "max_ms": 0.1435,
-        "mean_ms": 0.0622,
-        "min_ms": 0.047,
+        "max_ms": 0.398,
+        "mean_ms": 0.073,
+        "min_ms": 0.0492,
         "n": 500,
-        "p50_ms": 0.0595,
-        "p95_ms": 0.0862,
-        "p99_ms": 0.1153
+        "p50_ms": 0.0657,
+        "p95_ms": 0.1114,
+        "p99_ms": 0.1381
       },
       "coordinator_step": {
-        "max_ms": 1.439,
-        "mean_ms": 0.3696,
-        "min_ms": 0.2725,
+        "max_ms": 1.1727,
+        "mean_ms": 0.4228,
+        "min_ms": 0.2861,
         "n": 1500,
-        "p50_ms": 0.3555,
-        "p95_ms": 0.4928,
-        "p99_ms": 0.6108
+        "p50_ms": 0.4004,
+        "p95_ms": 0.6013,
+        "p99_ms": 0.704
       },
       "final_reward": 1.0,
       "node_step": {
-        "max_ms": 0.89,
-        "mean_ms": 0.1606,
-        "min_ms": 0.1189,
+        "max_ms": 0.5587,
+        "mean_ms": 0.1966,
+        "min_ms": 0.131,
         "n": 1500,
-        "p50_ms": 0.1487,
-        "p95_ms": 0.2333,
-        "p99_ms": 0.3094
+        "p50_ms": 0.1831,
+        "p95_ms": 0.298,
+        "p99_ms": 0.3827
       },
       "steps_per_episode": 3,
       "suite": "srp-env-web"

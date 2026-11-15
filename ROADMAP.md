@@ -5,7 +5,7 @@ SRP is maintained by one person. The order below is the order of work; there are
 | Version | Status | Scope |
 |---|---|---|
 | **v0.5** | Released (alpha) | Four specs, reference implementation, four simulated environment suites, end-to-end demo, test suite. |
-| **v0.6** | In progress | Reproducible benchmarks (`python -m benchmarks`) and a written verdict in [docs/ECONOMICS.md](docs/ECONOMICS.md). Fixes 1–3 below are done and re-measured; 4 and 5 remain. |
+| **v0.6** | Work done; not yet released (package and protocol still report 0.5.0) | Reproducible benchmarks (`python -m benchmarks`), a written verdict in [docs/ECONOMICS.md](docs/ECONOMICS.md), and the five fixes below, re-measured. |
 | **v0.7** | After v0.6 | Security hardening. Property-based tests for wire-message validation, a sandbox escape-attempt suite, dependency and static-analysis checks in CI, and a security review guide. |
 | **v1.0** | Later | Community security review complete and its findings addressed. Permissionless testnet. |
 
@@ -14,8 +14,8 @@ SRP is maintained by one person. The order below is the order of work; there are
 1. ~~Persistent connections in the HTTP transport.~~ Done: one round trip per call instead of two.
 2. ~~A larger listen queue in `NodeServer`.~~ Done: no more 1-second stalls under concurrent load.
 3. ~~Release snapshot file contents after pinning.~~ Done: a pinned snapshot costs 1.15× its size instead of 2.1×.
-4. An audit policy that does not replay every rewarded episode (needs a change to SRP-003, since it trades verification strength for cost).
-5. Example settlement rates calibrated to datacenter RAM prices.
+4. ~~An audit policy that does not replay every rewarded episode.~~ Done: `rewarded_audit_rate` (default 1.0, unchanged). At 0.1, duplicated audit work falls from 100% to 13–20%, at the cost of letting some fabricated rewards through before a cheater is caught (SRP-003 §2.2).
+5. ~~Example settlement rates calibrated to datacenter RAM prices.~~ Done: 0.002 per GB-hour and 0.000001 per step, down from 0.04–0.05 and 0.0005–0.001.
 
 ## Planned, not scheduled
 
